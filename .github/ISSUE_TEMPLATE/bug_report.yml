@@ -1,0 +1,107 @@
+name: Bug report
+description: Report reproducible incorrect behavior in AgentReady Lab itself
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. AgentReady Lab is currently an implementation blueprint, so first confirm the affected feature is listed as implemented in `PROJECT_STATUS.md`.
+
+        Do not report a security vulnerability here. Use private vulnerability reporting from the repository's Security tab. Remove secrets, private URLs, personal data, cookies, and authorization headers.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Documentation or specification
+        - CLI
+        - Rule engine
+        - Transport or networking
+        - Reporter or output schema
+        - Fixture or test kit
+        - GitHub Action or CI integration
+        - Hosted demo
+        - Other implemented component
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the AgentReady Lab version or full commit SHA. Write "design blueprint" for a documentation problem before releases exist.
+      placeholder: 0.1.0 or full commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, Node.js version, installation method, and relevant runtime.
+      placeholder: Ubuntu 24.04, Node 24.x, source checkout
+    validations:
+      required: false
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest deterministic reproduction. Prefer a local fixture over a live site.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened, and which documented contract supports that expectation?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include sanitized output, error text, and exit code where relevant.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Sanitized configuration
+      description: Include profile, mode, ruleset version, and relevant options. Remove all secrets and private data.
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add regression information, logs, or screenshots only when they contain no sensitive information.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I confirmed that the affected feature is implemented rather than only planned.
+          required: true
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials, private URLs, personal data, cookies, and sensitive headers.
+          required: true
+        - label: This report does not contain a security vulnerability.
+          required: true
+        - label: I own or am authorized to test every non-local target included in this report.
+          required: true

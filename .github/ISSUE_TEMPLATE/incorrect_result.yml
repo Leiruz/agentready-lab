@@ -1,0 +1,121 @@
+name: Incorrect result
+description: Report a reproducible false positive, false negative, or applicability error
+title: "[Incorrect result]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when a rule returns the wrong verdict or applicability status. Prefer a reduced local fixture. A difference from another scanner is not by itself proof that either implementation is wrong.
+
+        Do not include credentials, private URLs, personal data, authorization headers, or vulnerability details.
+
+  - type: input
+    id: rule_id
+    attributes:
+      label: Rule ID
+      placeholder: content.markdown-negotiation
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Tool, profile, and ruleset versions
+      placeholder: tool 0.1.0; profile content@0.1.0; ruleset 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Interpretation mode
+      options:
+        - spec
+        - compat
+        - interop
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Problem type
+      options:
+        - False positive
+        - False negative
+        - Incorrect warning
+        - Incorrect not-applicable result
+        - Incorrect unable-to-check result
+        - Evidence or diagnostic is misleading
+        - Other verdict problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: target
+    attributes:
+      label: Reproduction target or fixture
+      description: Prefer fixture code or a local URL. Include a public URL only when testing is authorized and repeated maintainer requests are acceptable.
+      placeholder: Local fixture path, minimal response, or authorized public URL
+    validations:
+      required: true
+
+  - type: textarea
+    id: request
+    attributes:
+      label: Sanitized request and response evidence
+      description: Include relevant method, URL path, status, redirects, headers, and the smallest relevant body fragment. Remove sensitive data.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reported
+    attributes:
+      label: Reported result
+      description: Include the status, assertion, evidence, and diagnostic emitted by AgentReady Lab.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Explain the expected status and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Supporting primary source
+      description: Provide the specification URL, exact version or dated draft, and section. For compat mode, provide the dated public compatibility contract.
+      placeholder: URL, version/date, and section
+    validations:
+      required: true
+
+  - type: input
+    id: observed_at
+    attributes:
+      label: Observation timestamp
+      description: Required for live or compatibility observations; use an ISO 8601 timestamp. Write "local fixture" when applicable.
+      placeholder: 2026-08-28T12:00:00Z or local fixture
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I reduced this to a deterministic local fixture where reasonably possible.
+          required: true
+        - label: I own or am authorized to test every non-local target included in this report.
+          required: true
+        - label: I removed credentials, private URLs, personal data, cookies, and sensitive headers.
+          required: true
+        - label: I understand that disagreement with another scanner is not automatically a conformance bug.
+          required: true
+        - label: This report does not contain undisclosed vulnerability details.
+          required: true

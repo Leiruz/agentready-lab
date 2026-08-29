@@ -1,0 +1,131 @@
+name: Rule proposal
+description: Propose a new standards rule or a material change to rule semantics
+title: "[Rule proposal]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A rule proposal needs an exact primary source and testable behavior. Do not begin a substantial implementation until a maintainer agrees on scope and interpretation.
+
+        External scanner behavior may support a separately labeled compatibility observation, but it does not create a normative web requirement.
+
+  - type: input
+    id: proposed_id
+    attributes:
+      label: Proposed rule ID and title
+      placeholder: discovery.example-rule — Example discovery mechanism
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Interoperability problem
+      description: What concrete developer or agent problem would this rule detect?
+    validations:
+      required: true
+
+  - type: input
+    id: source_url
+    attributes:
+      label: Primary specification URL
+      description: Link the RFC, official specification, dated draft, or versioned source repository.
+      placeholder: https://...
+    validations:
+      required: true
+
+  - type: input
+    id: source_version
+    attributes:
+      label: Exact source version
+      description: Provide an RFC number, release, draft number and date, or commit SHA.
+      placeholder: RFC 0000, draft-foo-03 dated YYYY-MM-DD, or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: source_section
+    attributes:
+      label: Section or schema location
+      placeholder: Section 4.2 or schema path
+    validations:
+      required: true
+
+  - type: dropdown
+    id: maturity
+    attributes:
+      label: Source maturity
+      options:
+        - Draft or proposal
+        - Provisional or experimental
+        - Published stable specification
+        - Published RFC
+        - Compatibility observation only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: classification
+    attributes:
+      label: Proposed assertion classification
+      options:
+        - Normative requirement
+        - Recommendation
+        - Advisory interoperability guidance
+        - Mixed; explain each assertion below
+    validations:
+      required: true
+
+  - type: textarea
+    id: assertions
+    attributes:
+      label: Proposed assertions and verdicts
+      description: Describe applicability and the conditions for pass, fail, warning, not-applicable, and unable-to-check. Do not paste large portions of the specification.
+    validations:
+      required: true
+
+  - type: textarea
+    id: positive
+    attributes:
+      label: Positive fixture
+      description: Describe the smallest deterministic valid example and expected evidence.
+    validations:
+      required: true
+
+  - type: textarea
+    id: negative
+    attributes:
+      label: Negative and ambiguous fixtures
+      description: Describe invalid, ambiguous, redirect, media-type, or unreachable cases that distinguish correct behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security, privacy, and request-budget impact
+      description: List new requests, redirects, parsers, body limits, sensitive data, execution risks, or explain why there are none.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementations
+    attributes:
+      label: Known implementations and prior art
+      description: Link implementations or conformance suites. Links are context, not permission to copy code or text.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I linked a primary, versioned source rather than relying only on a blog post.
+          required: true
+        - label: I separated normative requirements from recommendations and project advice.
+          required: true
+        - label: I have not copied third-party source, prompts, UI, scoring, branding, or report text.
+          required: true
+        - label: I will wait for maintainer agreement before beginning substantial implementation work.
+          required: true
