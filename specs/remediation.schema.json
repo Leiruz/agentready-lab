@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentready-lab:schema:remediation:v0",
+  "title": "AgentReady Lab remediation text v0",
+  "description": "Independently written remediation, keyed by finding code (ADR-0007 section 2). A finding code is a spec-mode assertion id or a compat-mode assertion id, so an entry here joins to exactly one assertion of specs/ruleset.standard.v0.yaml. It is a separate file from the ruleset because the two have different authors, review requirements, licensing exposure, and change cadences, and because specs/checks.v0.yaml is frozen and additionalProperties:false throughout. Only `class` and `summary` reach a report; `detail` is surfaced by the human reporter and by `rules explain`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "remediation_version",
+    "ruleset_id",
+    "ruleset_version",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0"
+    },
+    "remediation_version": {
+      "description": "ADR-0007 section 2's fifth version axis. Moves whenever remediation text changes, independently of the ruleset, the ledger, and the snapshot. A source's pinned version changing in a way that invalidates existing text moves this and the affected rule_version.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "ruleset_id": {
+      "description": "The ruleset whose assertion ids these finding codes are. It must equal specs/ruleset.standard.v0.yaml's, for the reason the ruleset's own source_ledger_version must equal the ledger's: a version recorded in one file and never compared with the other is decoration.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ruleset_version": {
+      "description": "The ruleset_version this text was written against, and which the validator holds it equal to.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "todo": {
+      "$ref": "#/$defs/todo"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "todo": {
+      "description": "Values an accepted decision requires but does not supply. Never a placeholder for a value that was simply not looked up.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "entry": {
+      "description": "One finding code's remediation. Unique on `finding_code` across the file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_code",
+        "rule_id",
+        "class",
+        "summary",
+        "detail",
+        "source_refs",
+        "authored_at"
+      ],
+      "properties": {
+        "finding_code": {
+          "description": "ADR-0002 section 9 makes this identical to a spec.requirements id for a spec-mode finding and to the rule's own versioned compatibility assertion id for a compat-mode finding, so both id shapes are accepted here.",
+          "type": "string",
+          "pattern": "^(?:[a-z0-9][a-z0-9._-]*|compat:[a-z][a-zA-Z0-9]*\\.[a-z][a-z0-9-]*@\\d{4}-\\d{2}-\\d{2})$"
+        },
+        "rule_id": {
+          "description": "The rule that declares the assertion. Carried so a reader of this file alone can tell which rule a finding code belongs to; the validator holds it equal to the ruleset's.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$"
+        },
+        "class": {
+          "description": "FR-6's three kinds. Fixed by the assertion's strength rather than chosen: a normative assertion derives `fail` and its remediation is a required correction, a recommended or advisory assertion derives `warning` and its remediation is hardening, and only a compatibility assertion, which is a claim about a dated external tool and never about conformance, carries a compatibility workaround.",
+          "enum": [
+            "required-correction",
+            "recommended-hardening",
+            "compatibility-workaround"
+          ]
+        },
+        "summary": {
+          "description": "The one line that enters the report, bounded at 240 characters by ADR-0007 section 2. It states the change, not the defect: a summary that restates the assertion tells a reader nothing the message did not.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "detail": {
+          "description": "Unbounded prose, surfaced by the human reporter and by `agentready-lab rules explain <rule-id>`, never embedded per finding. Where the pinned source prescribes no fix, this says so; inventing prescriptive advice the source does not support is the failure mode it exists to prevent.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "description": "Ledger identifiers, in the string form specs/checks.v0.yaml uses rather than the ruleset's {source, section} objects. A section pointer belongs to the assertion, which this entry names, and a second copy here would be two pointers that can disagree. ADR-0007 section 4 requires these to resolve against the same registry as the finding's sourceRefs, so the validator additionally holds them to a subset of what the assertion cites: remediation may not rest on a source the requirement it explains does not rest on.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          }
+        },
+        "authored_at": {
+          "description": "The date a human wrote or last revised this text. ADR-0007 section 4 forbids generating it at scan time or at any other time without a human author and a review, and this date is where that claim is recorded. Checked for shape only: this file declares no clock of its own, exactly as snapshot.captured_at is bounded by nothing.",
+          "type": "string",
+          "format": "date"
+        },
+        "todo": {
+          "$ref": "#/$defs/todo"
+        }
+      }
+    }
+  }
+}

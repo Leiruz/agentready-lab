@@ -1,0 +1,855 @@
+# AgentReady Lab remediation text (ADR-0007 section 2).
+#
+# What this project tells a site operator to change, keyed by finding code.
+# Every entry is written from the pinned source the assertion cites and from
+# the readings this repository has recorded of it. No text here is copied,
+# paraphrased, or derived from IsItAgentReady or any other scanner: ADR-0001
+# section 3 and CLAUDE.md forbid it, and the project's claim to be an
+# independent implementation rests on it.
+#
+# `class` is not a judgement call. It follows the assertion's `strength` in
+# specs/ruleset.standard.v0.yaml, because that is what decides whether a
+# violation derives `fail` or `warning`, and a required correction attached to
+# something that can only warn would overstate what was found.
+#
+# Where a pinned source prescribes no fix, the entry says so and carries a
+# `todo`. Four do. Inventing prescriptive advice a source does not support
+# would be the same defect as copying someone else's.
+#
+# Coverage is mechanical, not a checklist: an assertion that cites at least one
+# source and is not deferred can be configured, so it needs an entry, and
+# `pnpm run specs:validate` fails without one. The fourteen rules outside M1
+# cite nothing yet and are refused before a scan for that reason, so they have
+# no entries here and will acquire them when their citations land.
+
+schema_version: "0"
+remediation_version: "0.1.0"
+ruleset_id: "standard"
+ruleset_version: "0.4.0"
+
+entries:
+  # ---------------------------------------------------------------------
+  # web.discovery.robots
+  # ---------------------------------------------------------------------
+  - finding_code: "robots.location"
+    rule_id: "web.discovery.robots"
+    class: "required-correction"
+    summary: >-
+      Publish the rules at the lowercase path /robots.txt on this exact origin
+      and return them as a successful response body, which is the one place
+      RFC 9309 tells a crawler to look.
+    detail: >-
+      RFC 9309 fixes one location per origin: the lowercase /robots.txt path at
+      the root of the scheme, host and port being crawled. A crawler does not
+      search elsewhere for the file and does not inherit one from a parent
+      domain, from another port, or from the other scheme, so rules published
+      at /robots/robots.txt, or only under https while http is also served,
+      leave this origin with no readable policy at all.
+
+      The rules must arrive as the body of a successful response. A 404, an
+      HTML "page not found" served with a 200, or a redirect to a general site
+      page are all the same outcome from a crawler's side: no policy was
+      published here, and the preferences the file was meant to carry have no
+      effect on anything.
+    source_refs: ["rfc9309"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "robots.syntax"
+    rule_id: "web.discovery.robots"
+    class: "required-correction"
+    summary: >-
+      Serve robots.txt as UTF-8 and write each rule as an RFC 9309 record: a
+      user-agent line opens a group, and the allow and disallow lines that
+      follow belong to the group above them.
+    detail: >-
+      RFC 9309 defines the file as UTF-8 text made of records, and a crawler is
+      entitled to ignore a line it cannot parse. Two consequences fall on the
+      publisher.
+
+      Encoding first. Serve the file as UTF-8. A file emitted in another
+      encoding can mangle exactly the product tokens the rules name, and a
+      group whose user-agent token no longer matches is a group that applies to
+      nobody.
+
+      Grouping second. Membership is positional: allow and disallow lines apply
+      to the user-agent lines immediately above them. A rule written before any
+      user-agent line belongs to no group and restricts nothing, and a rule
+      separated from its intended group by an intervening record may not be
+      read as part of it. Where the intent is a default for every crawler,
+      write it in a group headed by "user-agent: *".
+
+      Precedence third, because it is the one most often written wrong. Within
+      the selected group RFC 9309 resolves a competing allow and disallow by
+      the most specific match, not by which line came first. A policy expressed
+      through line order alone will not be read the way it was written.
+    source_refs: ["rfc9309"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "robots.not-authz"
+    rule_id: "web.discovery.robots"
+    class: "recommended-hardening"
+    summary: >-
+      Protect anything confidential at the resource itself, not with a Disallow
+      line. RFC 9309 states a preference to cooperating crawlers, and the paths
+      a robots.txt names are published to every reader.
+    detail: >-
+      RFC 9309 communicates crawl preferences and confers no access control. It
+      binds only a crawler that chooses to honour it, and nothing in it
+      prevents a fetch by anyone else.
+
+      Two things follow. A path that must not be read needs authentication,
+      network restriction, or removal, applied at the resource; a disallow for
+      it changes nothing about who can retrieve it. And because robots.txt is
+      world-readable by design, naming a path in it advertises that the path
+      exists, so a disallow over a sensitive directory is closer to a
+      disclosure than to a control.
+
+      The pinned source prescribes no edit to robots.txt here. It states a
+      limit on what the file means, so the change this finding asks for is to
+      the access control around the resource, and a publisher whose robots.txt
+      names nothing sensitive has nothing to change.
+    source_refs: ["rfc9309"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        rfc9309 prescribes no publisher-side edit for this assertion: it
+        constrains what a robots.txt means, not what it must contain. The entry
+        explains the limit and directs the correction to the resource's own
+        access control instead of inventing a file change.
+
+  # ---------------------------------------------------------------------
+  # web.discovery.sitemap
+  # ---------------------------------------------------------------------
+  - finding_code: "sitemap.xml"
+    rule_id: "web.discovery.sitemap"
+    class: "required-correction"
+    summary: >-
+      Serve the sitemap as UTF-8 XML rooted in urlset or sitemapindex in the
+      Sitemaps 0.9 namespace, keep every loc inside the sitemap's own directory,
+      and split it before the protocol's per-file limits.
+    detail: >-
+      The Sitemaps protocol fixes four things a consumer checks before reading
+      a single URL, and a document that misses any of them is not a sitemap
+      whatever it contains.
+
+      Root element and namespace. The root is urlset for a sitemap or
+      sitemapindex for an index, declared in the Sitemaps 0.9 namespace. A
+      document that carries the right elements in no namespace, or in a
+      namespace copied from a different version, does not match.
+
+      Encoding and escaping. The document is UTF-8, and every URL is entity
+      escaped, so an unescaped ampersand in a query string is a parse error
+      rather than a cosmetic problem.
+
+      Scope. Every loc must sit at or below the directory the sitemap itself is
+      served from. A sitemap at /blog/sitemap.xml cannot list URLs under
+      /shop/; publish a second sitemap there and reference both from an index.
+
+      Size. The protocol caps a single file at 50,000 URLs and at a stated
+      uncompressed byte size. Past either, split the file and list the parts in
+      a sitemapindex rather than serving one oversized document.
+    source_refs: ["sitemaps-protocol"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "sitemap.directive"
+    rule_id: "web.discovery.sitemap"
+    class: "required-correction"
+    summary: >-
+      Give every Sitemap record in robots.txt a complete absolute URL, and make
+      that URL serve the sitemap. The record is the only pointer a crawler
+      following this route has.
+    detail: >-
+      The Sitemaps protocol specifies that a Sitemap record in robots.txt
+      carries a full absolute URL. RFC 9309 section 2.2.4 is the only place the
+      robots exclusion protocol addresses a record it does not itself define:
+      it permits a crawler to interpret such a record and permits leniency, and
+      it fixes no way to repair a value that does not resolve.
+
+      So a relative value such as "Sitemap: /sitemap.xml" is not a shorthand a
+      crawler is required to expand, and an absolute URL that answers 404, or
+      redirects to a marketing page, points at nothing. Either is a dead end
+      for discovery that starts from robots.txt, even when a perfectly good
+      sitemap exists elsewhere on the origin.
+
+      Write the record with the scheme, host and path in full, and fetch that
+      URL yourself to confirm it returns the sitemap document rather than a
+      page about it.
+    source_refs: ["sitemaps-protocol", "rfc9309"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "sitemap.canonical"
+    rule_id: "web.discovery.sitemap"
+    class: "recommended-hardening"
+    summary: >-
+      List each page once, under the absolute canonical URL you want fetched,
+      and set lastmod only when it reflects a real change to that page.
+      Otherwise omit lastmod.
+    detail: >-
+      The Sitemaps protocol requires each loc to be a complete absolute URL,
+      and this recommendation is about which absolute URL you choose. A session
+      identifier, a tracking parameter, or a variant path listed in place of
+      the canonical form asks a consumer to spend its budget on duplicates of
+      pages it has already seen.
+
+      lastmod is optional, and supplying it is a statement about the resource.
+      A build pipeline that stamps every entry with the deploy timestamp makes
+      the field carry no information and teaches consumers to ignore it
+      everywhere. Emit the date the page's content actually changed, or leave
+      the element out.
+
+      This is a recommendation about the quality of the data, not a conformance
+      requirement. A sitemap whose loc values are well-formed absolute URLs is
+      valid whether or not they are the canonical ones, which is why a failure
+      here is a warning.
+    source_refs: ["sitemaps-protocol"]
+    authored_at: "2026-08-29"
+
+  # ---------------------------------------------------------------------
+  # web.discovery.link
+  # ---------------------------------------------------------------------
+  - finding_code: "links.parse"
+    rule_id: "web.discovery.link"
+    class: "required-correction"
+    summary: >-
+      Emit Link fields in RFC 8288 syntax: the target URI inside angle
+      brackets, each parameter after a semicolon, values quoted where the
+      grammar requires it, and multiple links separated by commas.
+    detail: >-
+      RFC 8288 defines one grammar for the Link field, and a recipient that
+      parses it correctly cannot recover a field that does not follow it.
+
+      The target URI is delimited by "<" and ">". Omitting the brackets, or
+      wrapping the URI in quotation marks instead, does not produce a value a
+      lenient parser rescues; it produces a value with no target.
+
+      Parameters follow the target as ";name=value", and a value containing a
+      space, a comma or a semicolon has to be a quoted string. This is the
+      failure that hides longest: an unquoted value containing a comma is read
+      as the separator between two links, so one field silently becomes two
+      malformed ones.
+
+      Several links may be sent either as one comma-separated field value or as
+      repeated Link header lines, and both are correct. What is not correct is
+      a value assembled by concatenation with the separator left out.
+
+      A relative target is legitimate and is resolved against the request URI,
+      so relative targets need no change. Where a link is about a resource
+      other than the one requested, RFC 8288's anchor parameter is what says
+      so; without it the context is the request URI and the link is attributed
+      to the wrong resource.
+    source_refs: ["rfc8288"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "links.relation"
+    rule_id: "web.discovery.link"
+    class: "required-correction"
+    summary: >-
+      Set rel to a registered relation name exactly, or to an absolute URI for
+      a relation that is not registered. A near miss such as service-description
+      is a different token with no registered meaning.
+    detail: >-
+      RFC 8288 gives a relation name two forms and only two: a name from the
+      IANA link relation registry, matched whole and case-insensitively, or an
+      absolute URI controlled by whoever defines the relation. A token that
+      merely contains a registered name is not that relation.
+
+      So "describedby" is registered and "described-by" is an unregistered
+      token no consumer is obliged to understand. "service-desc" says the
+      target is a description of the service's interface; "service-description"
+      says nothing a registry resolves. Nothing in the RFC asks a consumer to
+      guess which was meant, and a consumer that guessed would be inventing
+      semantics for you.
+
+      Where a relation genuinely has no registered name, use a URI you control
+      rather than coining a bare word. That is the extension mechanism RFC 8288
+      provides, and it is what keeps a private relation from colliding with a
+      future registration.
+
+      A rel value may carry several space-separated names. Each is matched
+      whole, so adding one does not qualify or narrow another.
+    source_refs: ["rfc8288"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "links.agent-useful"
+    rule_id: "web.discovery.link"
+    class: "recommended-hardening"
+    summary: >-
+      No link here carries a relation this project's own policy 0.1.0 counts as
+      agent-useful: service-desc, describedby, or api-catalog. That policy is
+      our opinion and no specification requires any of them.
+    detail: >-
+      This is the one assertion in the rule that rests on AgentReady Lab's own
+      policy rather than on a specification. Policy 0.1.0 classifies exactly
+      three relation names as agent-useful: service-desc, describedby, and
+      api-catalog. No external body has reviewed or endorsed that list, and a
+      response carrying none of them violates RFC 8288 and nothing else. The
+      warning says only that an agent arriving here is offered no typed pointer
+      to a description of what it has arrived at.
+
+      If a machine-readable description already exists, link to it with the
+      relation that fits what it describes: service-desc for a description of
+      the service's interface, describedby for a description of this particular
+      resource, api-catalog for the origin's catalog of APIs.
+
+      If none exists, whether to publish one is a product decision, and this
+      project is not in a position to make it for you. Nothing here is needed
+      to conform to anything.
+    source_refs: ["agentready-lab-agent-useful-relations"]
+    authored_at: "2026-08-29"
+
+  # ---------------------------------------------------------------------
+  # web.content.markdown-negotiation
+  # ---------------------------------------------------------------------
+  - finding_code: "markdown.media-type"
+    rule_id: "web.content.markdown-negotiation"
+    class: "required-correction"
+    summary: >-
+      Label the Markdown representation Content-Type: text/markdown, the media
+      type RFC 7763 registers. text/plain, text/x-markdown and
+      application/octet-stream each tell a client something different.
+    detail: >-
+      RFC 7763 section 2 registers text/markdown, so that is the label which
+      identifies the representation a client negotiated for. Set it on the
+      response that actually carries the Markdown, and use the parameters the
+      registration defines rather than inventing parameter names beside it.
+
+      The three substitutes seen most often are not lenient variants of the
+      registered type. text/plain says the body is unstructured text and a
+      consumer may render it verbatim, markup and all. text/x-markdown is an
+      experimental name predating the registration that no registry resolves.
+      application/octet-stream says the body has no known type, which is the
+      opposite of a successful negotiation.
+
+      The Content-Type is the only place this claim is made. A .md extension, a
+      path segment, and a link that promised Markdown are not the label, and a
+      consumer is right to believe the header over any of them.
+    source_refs: ["rfc7763"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "markdown.negotiation"
+    rule_id: "web.content.markdown-negotiation"
+    class: "required-correction"
+    summary: >-
+      Select the representation from the request's Accept header, and keep both
+      representations the same resource. A request that accepts only HTML must
+      receive HTML, whatever else the origin can produce.
+    detail: >-
+      RFC 9110 makes proactive negotiation a choice among representations of
+      one resource: the client states what it can accept, the server selects,
+      and everything the server may select has to be a representation of the
+      same thing. Two failures follow, and they pull in opposite directions.
+
+      Serving Markdown that was not asked for. An Accept header listing only
+      HTML types, or one that excludes text/markdown, is an instruction to
+      honour. Returning Markdown because the origin happens to have it, or
+      because the request looked automated, substitutes the server's preference
+      for the client's.
+
+      Letting the representations disagree. If the Markdown copy is a summary,
+      an older revision, or a different article, the URL identifies two
+      resources rather than one, and a consumer that negotiated its way to the
+      Markdown has been told something the HTML does not say. Generate both
+      from the same content.
+
+      One special case is worth naming because it defeats verification
+      entirely: detecting a scanner and serving it Markdown that ordinary
+      clients never receive is negotiation on the identity of the requester
+      rather than on Accept, and it makes the result unreproducible for
+      everyone else.
+    source_refs: ["rfc9110"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "markdown.vary"
+    rule_id: "web.content.markdown-negotiation"
+    class: "recommended-hardening"
+    summary: >-
+      Add Accept to the Vary header on every response whose body was selected
+      by it, including both representations, so a shared cache stores them
+      separately instead of reusing one for the other.
+    detail: >-
+      RFC 9110 section 12.5.5 defines Vary as the field a response uses to
+      declare which parts of the request selected it. A cache keys a stored
+      response by the request target plus the fields Vary names, so with no
+      Vary the response is keyed by the target alone and the first
+      representation stored for that URL is the one every later request gets.
+
+      The concrete failure is a shared cache, a CDN, a reverse proxy, or a
+      corporate cache, that stored the HTML for a browser and then hands it to
+      an agent whose request carried Accept: text/markdown, or the reverse.
+      Neither party did anything wrong and neither can tell.
+
+      Send Vary: Accept on both representations. A Vary on only one of them
+      still leaves the other cacheable under the bare URL, which is half a fix
+      and reads like a whole one.
+
+      This is caching correctness, not conformance. A response with no Vary is
+      a valid HTTP response, and an origin with no shared cache in front of it
+      will never observe the defect. That is why it warns rather than fails.
+    source_refs: ["rfc9110"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "markdown.fidelity"
+    rule_id: "web.content.markdown-negotiation"
+    class: "recommended-hardening"
+    summary: >-
+      The Markdown and HTML representations differ in content this check looked
+      at. RFC 9110 defines no fidelity criterion, so treat this as a report of
+      the difference and decide yourself whether it matters.
+    detail: >-
+      This project will not tell you what to change here, and the reason is
+      recorded rather than improvised. ADR-0010 section 6 leaves this
+      assertion's citation open: RFC 9110 has no fidelity criterion, does not
+      say which content is critical, does not define invented content, and
+      offers nothing to test a specific pair of representations against. The
+      rule's own interop caveat separately forbids using a language model as
+      the pass or fail oracle for semantic fidelity.
+
+      So the honest content of this finding is a difference, not a defect. Read
+      it as a prompt to check your own conversion: a heading dropped by a
+      converter, a code block flattened into prose, or a link that survived as
+      text with no target are the differences most likely to matter to a
+      consumer, and are worth fixing on their own merits.
+
+      What this project will not do is publish a threshold it has not defined.
+      Until a maintainer either records a reading of RFC 9110 that supports one
+      or writes the criterion down as project policy, any prescriptive advice
+      here would be an opinion wearing a citation.
+    source_refs: ["rfc9110"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        rfc9110 prescribes no fix, and ADR-0010 section 6 records the citation
+        itself as unsettled. This entry reports the difference and declines to
+        state a criterion; it must be rewritten when that decision is made,
+        which also moves remediation_version.
+
+  # ---------------------------------------------------------------------
+  # web.policy.ai-crawler
+  # ---------------------------------------------------------------------
+  - finding_code: "ai-rules.rep-parse"
+    rule_id: "web.policy.ai-crawler"
+    class: "required-correction"
+    summary: >-
+      Put each crawler's rules in a group opened by a user-agent line naming
+      that product token, and let RFC 9309 group selection and most-specific
+      match decide the result rather than line order.
+    detail: >-
+      RFC 9309 selects at most one group for a given crawler: the group whose
+      user-agent value matches the crawler's product token, or the "*" group if
+      none does. It does not merge the two.
+
+      That single fact produces the mistake this assertion catches most often.
+      Adding a narrow group for one AI crawler stops that crawler seeing the
+      wildcard group entirely, so every restriction written in "*" silently
+      stops applying to it. If a rule must apply to a token that has its own
+      group, repeat it inside that group.
+
+      Within the selected group, an allow and a disallow that both match are
+      resolved by the most specific match rather than by which came first, so
+      the rule you intend to win has to be the more specific pattern.
+
+      A rule that appears before any user-agent line, or a group whose
+      user-agent line is missing, belongs to no group at all and is applied to
+      nobody.
+    source_refs: ["rfc9309"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "ai-rules.token-source"
+    rule_id: "web.policy.ai-crawler"
+    class: "recommended-hardening"
+    summary: >-
+      The crawler tokens this project recognises come from three vendor
+      documentation pages read on a date, not from a specification. Check the
+      vendor's current page for the exact token before relying on it.
+    detail: >-
+      The pinned sources prescribe no change to your site. Each is a living
+      vendor page or support article that declares no version and no
+      publication date, so the date it was read is the entire pin. This
+      assertion exists to keep that provenance visible in the report rather
+      than to report a defect in the target.
+
+      It does bear on a publisher in one way. RFC 9309 matches a product token
+      as written, so a rule aimed at a token the vendor has since renamed or
+      retired quietly stops applying to anything, while the group it sits in
+      keeps that crawler out of the wildcard group. This project has already
+      recorded one such discrepancy between a dated external inventory and what
+      a vendor documents today.
+
+      The action, if any, is to re-read the vendor's own current documentation
+      for the token names you rely on, rather than copying a token list from a
+      third party, this project included.
+    source_refs: ["openai-crawlers", "google-crawlers", "anthropic-crawlers"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        the three pinned vendor pages prescribe no publisher-side correction:
+        the assertion is an obligation on this project to version and cite the
+        token registry it classifies with. The entry explains the provenance
+        and the one consequence a publisher can act on.
+
+  - finding_code: "ai-rules.effective-access"
+    rule_id: "web.policy.ai-crawler"
+    class: "recommended-hardening"
+    summary: >-
+      The rules as published resolve to a disallow for this token at the tested
+      path. If that is deliberate, nothing needs fixing; if not, the edit is in
+      that token's own group.
+    detail: >-
+      This reports what your published rules actually resolve to for one
+      product token at one path. It is not a claim that the resolution is
+      wrong. Blocking an AI crawler is a legitimate and fully conforming use of
+      RFC 9309, and a publisher who intends it should read this as
+      confirmation.
+
+      It is surfaced because the effective decision is often not the one the
+      author wrote. A token with its own group does not inherit the wildcard
+      group, so adding a narrow group can drop every restriction "*" carried;
+      and because precedence is by most specific match, a broad disallow beside
+      a narrow allow resolves differently from what the line order suggests.
+
+      Where the decision is unintended, make the allow more specific than the
+      disallow it has to beat, or remove the token's group so it falls back to
+      "*". Where no group matches the token at all, RFC 9309's outcome is that
+      access is not restricted, so an absent rule is already an allow and there
+      is nothing to add.
+    source_refs: ["rfc9309"]
+    authored_at: "2026-08-29"
+
+  # ---------------------------------------------------------------------
+  # web.policy.content-signals
+  # ---------------------------------------------------------------------
+  - finding_code: "content-signals.coverage"
+    rule_id: "web.policy.content-signals"
+    class: "recommended-hardening"
+    summary: >-
+      Name all three of the draft's usage categories, search, ai-input and
+      ai-train, or accept that an omitted one states nothing. This report will
+      never read an absent category as a yes or a no.
+    detail: >-
+      The pinned draft, draft-romm-aipref-contentsignals-00, defines three
+      usage categories in section 3 and labels them search, ai-input and
+      ai-train. That vocabulary is the whole of what this project pins.
+
+      A declaration naming some of them leaves the rest unstated, and this
+      project will not fill the gap in either direction: an omitted category is
+      reported as omitted, never as a permission and never as a refusal. If
+      your intent covers all three, name all three. If you deliberately leave
+      one open, nothing needs changing and this finding is describing your file
+      accurately.
+
+      One limit is worth stating plainly, because it bounds how helpful this
+      advice can be. The draft defines a vocabulary and nothing else: no field
+      syntax, no placement rule, and no value grammar. This project therefore
+      cannot tell you the form a declaration must take. It can only report
+      which of the three categories your declaration named, and no failure here
+      can ever be a specification failure.
+    source_refs: ["content-signals-draft-00"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        content-signals-draft-00 pins a vocabulary and defines no syntax, so
+        this entry can say which categories to name and cannot say how to write
+        them. A maintainer who wants a prescribed form has to pin a source that
+        defines one.
+
+  - finding_code: "content-signals.effect"
+    rule_id: "web.policy.content-signals"
+    class: "recommended-hardening"
+    summary: >-
+      A Content Signals declaration records a preference. It is not consent,
+      not a prohibition, and not evidence that any recipient honoured it, so do
+      not rely on it as the control over how content is used.
+    detail: >-
+      This finding is about the weight of the declaration, not its contents.
+      The pinned draft is an expired individual submission with no
+      standards-track status, and the project's own verification of
+      contentsignals.org found an application shell carrying no
+      machine-readable grammar. Neither establishes an obligation on anyone who
+      reads your file.
+
+      So a declaration tells a cooperating consumer what you would prefer, and
+      does nothing else. It does not grant permission, does not withhold it,
+      does not bind a recipient, and produces no record that any recipient read
+      it.
+
+      Nothing in your file needs to change for this. What may need to change is
+      what the declaration is being asked to do: where the requirement is that
+      content not be used in a particular way, that requirement needs a
+      mechanism which does not depend on the reader's cooperation, applied at
+      the resource itself. This project does not assess the legal or
+      contractual effect of any declaration, and no finding it produces should
+      be read as doing so.
+    source_refs: ["content-signals-draft-00", "content-signals"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        neither pinned source prescribes a change to the target: the assertion
+        constrains how this project describes a result. The entry states the
+        limit and points at access control without characterising any legal or
+        contractual effect, which ADR-0007 section 4 forbids.
+
+  - finding_code: "content-signals.conflicting-declaration"
+    rule_id: "web.policy.content-signals"
+    class: "recommended-hardening"
+    summary: >-
+      The same signal category is declared twice with different values in one
+      group, and no pinned source says which wins. Remove the duplicate so the
+      category is stated once with the value you intend.
+    detail: >-
+      draft-romm-aipref-contentsignals-00 defines a vocabulary and nothing
+      else: no field syntax, no placement rule, no value grammar, and no
+      conflict-resolution rule. RFC 9309 section 2.2.4, the only place the
+      robots exclusion protocol addresses a record it does not define, permits
+      a crawler to interpret such a record and permits it to be lenient, and it
+      fixes no outcome for two records that disagree.
+
+      There is therefore no correct answer to which of your two values applies,
+      and this project will not pick one on your behalf. Two consumers
+      resolving the conflict in opposite directions are both inside what the
+      pinned sources allow, which makes the declaration unreadable in practice
+      even though every line of it is acceptable in isolation.
+
+      The fix removes the ambiguity at the source: state each category once per
+      group, with the value you mean. This is not a violation of any pinned
+      specification; it is a declaration that cannot be read consistently.
+    source_refs: ["content-signals-draft-00", "rfc9309"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "content-signals.unrecognized-vocabulary"
+    rule_id: "web.policy.content-signals"
+    class: "recommended-hardening"
+    summary: >-
+      This declaration names a token outside the three the pinned draft
+      defines. If it was a spelling of search, ai-input or ai-train, correct
+      it; otherwise nothing here reads it and nothing is wrong with your file.
+    detail: >-
+      The pinned vocabulary is exactly three labels, search, ai-input and
+      ai-train, defined in section 3 of draft-romm-aipref-contentsignals-00 and
+      tabulated in section 4. A token outside that set is not wrong. The draft
+      is expired, it closes no value set, and no pinned specification forbids
+      declaring whatever you like.
+
+      What the finding records is that this project's pinned sources give the
+      token no meaning, so nothing here will act on it. The token is copied
+      into the report as bounded sanitized evidence so a reader can see exactly
+      what was declared rather than taking the classification on trust.
+
+      Two outcomes follow, and only one is yours to fix. If the token was a
+      spelling variant of one of the three, correct the spelling. If it belongs
+      to a vocabulary this project has not pinned, a vendor extension or a
+      newer draft, then there is nothing to correct in your file and the gap is
+      in what this project pins.
+    source_refs: ["content-signals-draft-00"]
+    authored_at: "2026-08-29"
+
+  # ---------------------------------------------------------------------
+  # agent.discovery.skills
+  #
+  # skills.archive-safety has no entry. ADR-0010 defers it, so it is excluded
+  # from the active set, is never evaluated, and can produce no finding to
+  # remediate.
+  # ---------------------------------------------------------------------
+  - finding_code: "skills.path-schema"
+    rule_id: "agent.discovery.skills"
+    class: "required-correction"
+    summary: >-
+      Serve the index at /.well-known/agent-skills/index.json with the exact
+      v0.2.0 $schema identifier and a skills array. An absent $schema is read
+      as v0.1.0 and an unrecognised one stops a client entirely.
+    detail: >-
+      The pinned draft fixes the discovery path as
+      /.well-known/agent-skills/index.json and requires the index document to
+      carry a top-level $schema and a skills array.
+
+      The v0.2.0 $schema value is
+      https://schemas.agentskills.io/discovery/0.2.0/schema.json. The draft
+      describes it as an opaque identifier a client is not expected to
+      dereference, so reproduce it exactly, character for character. Pointing
+      it at a schema you host instead gains nothing and costs recognition.
+
+      Two failure modes the draft names explicitly are worth stating because
+      neither announces itself. An index with no $schema is treated as version
+      0.1.0 for compatibility, so omitting the field silently downgrades the
+      document rather than defaulting to the current version. And a client
+      meeting a $schema it does not recognise should warn and should not
+      process the index, so a single typo in the identifier costs you the whole
+      index rather than one field.
+    source_refs: ["agent-skills-discovery-v0.2.0"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "skills.entry"
+    rule_id: "agent.discovery.skills"
+    class: "required-correction"
+    summary: >-
+      Give every skills entry all five required fields: a lowercase hyphenated
+      name of 1 to 64 characters, a type of skill-md or archive, a description,
+      a url, and a digest of sha256: plus 64 lowercase hex.
+    detail: >-
+      Version 0.2.0 requires name, type, description, url and digest on every
+      entry, and constrains three of them tightly enough that a plausible value
+      can still be the wrong one.
+
+      name is 1 to 64 characters of lowercase alphanumerics and hyphens, with
+      no leading, trailing, or consecutive hyphen. The grammar rejects such a
+      name rather than normalising it, so "My-Skill--v2" is not read as
+      "my-skill-v2"; it is not read at all.
+
+      type is exactly skill-md or archive. It is a closed pair, not an
+      extension point, and a third value is not a forward-compatible addition.
+
+      digest is the literal prefix "sha256:" followed by 64 lowercase
+      hexadecimal characters. A bare hash with no prefix, or the same hash in
+      uppercase, is not the declared form.
+
+      url resolves against the index URL under RFC 3986 section 5 and may be
+      path-absolute, absolute, or relative. A relative url is correct as it
+      stands and does not need rewriting to an absolute one.
+    source_refs: ["agent-skills-discovery-v0.2.0"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "skills.digest"
+    rule_id: "agent.discovery.skills"
+    class: "required-correction"
+    summary: >-
+      Recompute the declared digest over the artifact's raw bytes whenever the
+      artifact changes, and publish it as sha256: plus 64 lowercase hex. A
+      stale digest makes the skill unusable to a client that checks.
+    detail: >-
+      The draft defines the digest as SHA-256 over the artifact's raw bytes,
+      written as "sha256:" followed by 64 lowercase hexadecimal characters. It
+      is a claim about the exact bytes the url serves, so anything that changes
+      those bytes changes the digest even when the skill's content is
+      unchanged: republishing, a build step that reformats or re-serialises the
+      file, and a transformation applied by whatever sits in front of the
+      origin all invalidate a declared value.
+
+      Compute the digest in whatever publishes the artifact, rather than by
+      hand, so the two cannot drift apart. Anything that edits the artifact
+      after the digest is taken has to retake it.
+
+      A client that fetches the artifact and computes a different hash has to
+      assume the bytes it received are not the ones you declared. That is the
+      correct behaviour and is why a mismatch fails rather than warns.
+
+      Note the scope: this project compares the digest only in interop mode,
+      where the artifact is actually fetched. In spec mode it checks the
+      declared value's syntax and nothing more.
+    source_refs: ["agent-skills-discovery-v0.2.0"]
+    authored_at: "2026-08-29"
+
+  # ---------------------------------------------------------------------
+  # web.discovery.api-catalog
+  # ---------------------------------------------------------------------
+  - finding_code: "api-catalog.discovery"
+    rule_id: "web.discovery.api-catalog"
+    class: "required-correction"
+    summary: >-
+      Publish the catalog at /.well-known/api-catalog, or advertise wherever it
+      lives with a Link whose rel is api-catalog. RFC 9727 defines both routes
+      and a consumer needs one of them.
+    detail: >-
+      RFC 9727 gives an origin two ways to make its API catalog findable: the
+      well-known URI /.well-known/api-catalog at the origin root, and a link
+      whose relation type is api-catalog and whose target is wherever the
+      catalog actually is.
+
+      The link form exists precisely so the document does not have to sit at
+      the well-known path. A catalog published at an application-specific URL
+      conforms as long as something advertises it with that relation. What does
+      not conform is a catalog only a human reading your developer
+      documentation could locate.
+
+      If you serve the well-known URI, serve it at the root of the origin the
+      APIs belong to, and return the catalog document itself. An HTML developer
+      portal at that path answers the request without answering the question,
+      because the media type is what tells a consumer it found a catalog.
+    source_refs: ["rfc9727"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "api-catalog.linkset"
+    rule_id: "web.discovery.api-catalog"
+    class: "required-correction"
+    summary: >-
+      Serve the catalog as application/linkset+json: an object with a linkset
+      array whose members each carry an anchor and their links by relation
+      type. An HTML page or a bare array is not a linkset.
+    detail: >-
+      RFC 9264 defines the linkset document format and its media types, and
+      application/linkset+json is the JSON serialization this rule reads. Its
+      shape is fixed: a top-level object with a linkset member holding an array
+      of link context objects, each carrying an anchor that names the resource
+      its links are about, and one member per relation type whose value is an
+      array of targets.
+
+      Two consequences are concrete for a publisher. The anchor is not
+      decoration: it is what says which resource each group of links describes,
+      and a context with no anchor leaves a consumer to assume the linkset's
+      own URL is the subject. And target attributes such as title, type and
+      hreflang have defined places inside the target object; hoisting them to
+      the link context, or inventing sibling members for them, produces
+      something that parses as JSON and is not a linkset.
+
+      Send it with Content-Type: application/linkset+json. The media type is
+      the only thing that tells a consumer what it received.
+    source_refs: ["rfc9264"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "api-catalog.relations"
+    rule_id: "web.discovery.api-catalog"
+    class: "required-correction"
+    summary: >-
+      Put at least one real API in the catalog, linked with the relation types
+      RFC 9727 section 4.1 specifies. A syntactically valid linkset whose array
+      is empty or unrelated is a catalog of nothing.
+    detail: >-
+      A document can satisfy RFC 9264 completely and still not be an API
+      catalog. RFC 9727 section 4.1 is what makes it one: it specifies the
+      links an entry carries and what each relation means, and presence of the
+      linkset array is not evidence that any of it is there.
+
+      This project's own conformant baseline fixture is a catalog with a
+      non-empty entry carrying an anchor and a link to a service description;
+      its negative fixture is a document whose linkset array is empty, which
+      fails here precisely because nothing in it points at an API. An array of
+      links that are all about something else fails for the same reason.
+
+      Take the relation types and their semantics from RFC 9727 section 4.1
+      rather than from this note. This file deliberately does not restate them,
+      because no document in this repository has recorded a reading of that
+      section beyond the requirement that a hyperlink to an API is present, and
+      an approximate list here would be worse than the specification it stood
+      in for.
+    source_refs: ["rfc9727"]
+    authored_at: "2026-08-29"
+
+  - finding_code: "api-catalog.profile"
+    rule_id: "web.discovery.api-catalog"
+    class: "recommended-hardening"
+    summary: >-
+      Advertise the profile RFC 9727 defines for an API catalog, so a consumer
+      can tell a catalog from any other linkset before parsing it. Take the
+      profile URI from the RFC itself.
+    detail: >-
+      A linkset is a general format, so application/linkset+json alone says
+      only that the body is a set of links. RFC 9727 defines a profile for the
+      catalog specifically, and advertising it lets a consumer establish what
+      it is holding before it inspects the contents, which is the difference
+      between recognising a catalog and inferring one.
+
+      This entry names the mechanism and stops there. No document in this
+      repository has recorded a reading of the profile URI's exact value or of
+      the precise circumstances in which RFC 9727 recommends advertising it, so
+      restating either here would be a value nobody verified, dressed as
+      guidance. Read it out of RFC 9727 and use it verbatim.
+
+      This is a recommendation. A catalog that omits the profile is still a
+      conforming catalog, which is why it warns.
+    source_refs: ["rfc9727"]
+    authored_at: "2026-08-29"
+    todo:
+      - >-
+        the RFC 9727 profile URI and the exact conditions under which the
+        specification recommends advertising it are not recorded in any
+        repository document. This entry names the mechanism and refuses to
+        restate an unverified value; whoever reads RFC 9727 for
+        api-catalog.relations should close this at the same time.
