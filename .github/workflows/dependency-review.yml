@@ -1,0 +1,59 @@
+# docs/THREAT_MODEL.md section 22: "Enable dependency review and automated
+# dependency update proposals" and "Run CodeQL or equivalent static analysis,
+# secret scanning, and license checks."
+name: Dependency review
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull-request code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Review dependency and license changes
+        # Requires the repository dependency graph to be enabled.
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+          # The permissive set actually present in the current dependency tree
+          # (497 installed packages, surveyed 2026-08-29). A new dependency
+          # under any other license is a decision for a human, not a default.
+          allow-licenses: >-
+            Apache-2.0,
+            MIT,
+            ISC,
+            BSD-2-Clause,
+            BSD-3-Clause,
+            BlueOak-1.0.0,
+            CC0-1.0,
+            0BSD,
+            Unlicense
+          # Two weak-copyleft packages are already in the tree today, both
+          # development-only, platform-specific and transitive under wrangler:
+          # lightningcss (MPL-2.0) and @img/sharp-win32-x64
+          # (Apache-2.0 AND LGPL-3.0-or-later). Naming them keeps the gate
+          # meaningful for everything else instead of widening the allow-list.
+          allow-dependencies-licenses: >-
+            pkg:npm/lightningcss,
+            pkg:npm/lightningcss-win32-x64-msvc,
+            pkg:npm/@img/sharp-win32-x64
+          # docs/THREAT_MODEL.md section 21: pull-request comments are not
+          # created by default. This is the action's default; it is set
+          # explicitly so that it stays a decision. Enabling it would require
+          # `pull-requests: write`, which this job deliberately does not have.
+          comment-summary-in-pr: never

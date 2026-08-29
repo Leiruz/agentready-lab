@@ -1,0 +1,45 @@
+# docs/THREAT_MODEL.md section 22: "Run CodeQL or equivalent static analysis".
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query pack is applied to code that has not
+    # changed. Off the hour to avoid the scheduler's peak.
+    - cron: "37 5 * * 1"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze JavaScript and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Uploading the SARIF results is the only write this repository grants,
+      # and it is granted on this job alone.
+      security-events: write
+      # Required for CodeQL to read workflow run data on a private repository.
+      actions: read
+    steps:
+      - name: Check out the pull-request code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+          # No build step, so no pull-request build command is executed.
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9

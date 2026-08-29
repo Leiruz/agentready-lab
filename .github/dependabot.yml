@@ -1,0 +1,44 @@
+# docs/THREAT_MODEL.md section 22: "Enable dependency review and automated
+# dependency update proposals" and "Pin workflow actions to full commit SHAs."
+#
+# CONTRIBUTING.md requires a Developer Certificate of Origin sign-off on every
+# commit. Dependabot cannot add a `Signed-off-by` trailer, so its pull requests
+# need a maintainer decision: rebase with a sign-off before merge, or exempt
+# the bot in whatever DCO check the repository adopts. This file cannot settle
+# that; it is recorded here so the first Dependabot pull request is not a
+# surprise.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    # pnpm workspace: the root manifest, packages/* and apps/* are all
+    # discovered from here.
+    directory: "/"
+    schedule:
+      interval: weekly
+    # Every dependency in this repository is pinned to an exact version.
+    # `increase` proposes a new exact version instead of widening the pin
+    # into a range.
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    # pnpm-workspace.yaml sets `minimumReleaseAge: 10080` (seven days), so a
+    # bump to a release younger than that is a hard install failure. Matching
+    # the cooldown here means Dependabot does not open a pull request that CI
+    # cannot install.
+    cooldown:
+      default-days: 7
+    groups:
+      dev-tooling:
+        dependency-type: development
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"

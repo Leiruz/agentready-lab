@@ -1,5 +1,20 @@
 node_modules/
 dist/
+
+# Exception: the M2 GitHub Action bundle is a committed build artifact.
+# docs/MAINTAINER_CHECKLIST.md section 9 and docs/TEST_STRATEGY.md section 12
+# require packages/github-action/dist/index.js to be committed so that
+# `action:verify` can prove the committed bundle matches a clean rebuild.
+#
+# Git never descends into an excluded directory, so a bare
+# `!packages/github-action/dist/index.js` after `dist/` would do nothing. The
+# directory itself has to be re-included, its other contents re-excluded, and
+# only then the single committed file un-ignored. These three lines must stay
+# in this order and must stay after the `dist/` line above.
+!packages/github-action/dist/
+packages/github-action/dist/*
+!packages/github-action/dist/index.js
+
 coverage/
 .wrangler/
 .dev.vars
@@ -7,6 +22,9 @@ coverage/
 .env.*
 !.env.example
 *.log
+# tsc currently writes tsbuildinfo inside dist/, which `dist/` already covers.
+# This keeps it ignored if a tsconfig ever moves tsBuildInfoFile out of dist/.
+*.tsbuildinfo
 .DS_Store
 reports/
 

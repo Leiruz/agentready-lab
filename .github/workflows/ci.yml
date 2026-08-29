@@ -1,0 +1,114 @@
+# Required merge workflow. docs/TEST_STRATEGY.md section 12 defines the seven
+# ordered steps below and names Linux as the required merge platform. Hardening
+# follows docs/THREAT_MODEL.md sections 21 and 22.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# No token permission by default; each job re-grants only what it needs.
+# `pull_request_target` is deliberately absent: this workflow checks out and
+# runs pull-request code, so it must never hold a privileged token.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  merge:
+    name: Merge checks (Linux, Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the pull-request code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scan needs no write access, so the checkout token is not left
+          # in .git/config where a later step or a build script could read it.
+          persist-credentials: false
+
+      - name: Assert the Action bundle path is committable
+        # docs/MAINTAINER_CHECKLIST.md section 9 requires
+        # packages/github-action/dist/index.js to be committed so that
+        # `action:verify` can compare it against a clean rebuild. A bare
+        # `dist/` in .gitignore silently makes that impossible, and the failure
+        # mode is a bundle that is quietly never updated. Assert both
+        # directions so the exception cannot be widened into "commit all
+        # build output" either.
+        run: |
+          if git check-ignore -q packages/github-action/dist/index.js; then
+            echo "::error file=.gitignore::packages/github-action/dist/index.js is git-ignored, so the committed Action bundle cannot be verified (docs/MAINTAINER_CHECKLIST.md section 9)."
+            exit 1
+          fi
+          if ! git check-ignore -q packages/core/dist/index.js; then
+            echo "::error file=.gitignore::packages/core/dist/index.js is not git-ignored; ordinary build output must stay out of the repository."
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        # Version comes from the `packageManager` field in package.json.
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies from the committed lockfile
+        # docs/THREAT_MODEL.md section 22. pnpm-workspace.yaml already blocks
+        # dependency install scripts (`onlyBuiltDependencies: []`) and enforces
+        # the seven-day `minimumReleaseAge` quarantine.
+        run: pnpm install --frozen-lockfile
+
+      - name: 1. Formatting check
+        run: pnpm run format:check
+
+      - name: 2. Lint and package-boundary check
+        # The boundary check is a test, not a lint rule (docs/TEST_STRATEGY.md
+        # section 4), so it runs here as its own vitest project to fail fast on
+        # a dependency-direction violation. Step 4 re-runs it as part of the
+        # coverage-gated suite; the duplication is one small file.
+        run: |
+          pnpm run lint
+          pnpm run test:boundaries
+
+      - name: 3. TypeScript typecheck
+        run: pnpm run typecheck
+
+      - name: 4. Unit and contract tests
+        # docs/TEST_STRATEGY.md section 2.4 requires this job to run with
+        # network access disabled or with the global network APIs replaced by a
+        # throwing sentinel. That sentinel does not exist yet: it belongs in
+        # shared test setup under test/, not in this workflow. Blocking runner
+        # egress here is not a substitute, because the Actions runner needs its
+        # own outbound connection to report the job. Until the sentinel lands,
+        # this step does NOT enforce the network restriction.
+        run: pnpm run test
+
+      - name: 5. Workers fixture tests
+        run: pnpm run test:workers
+
+      - name: 6. Local integration tests
+        run: pnpm run test:integration
+
+      - name: 7. Build and package-content inspection
+        # docs/THREAT_MODEL.md section 22: "Inspect `npm pack` contents and
+        # exclude fixtures, secrets, and unnecessary development files."
+        # --dry-run prints the tarball contents without writing a tarball, so
+        # the working tree stays clean for the next step.
+        run: |
+          pnpm run build
+          pnpm --filter "./packages/*" exec npm pack --dry-run
+
+      - name: No step modified a committed file
+        # One line that catches lockfile drift, Prettier drift and
+        # generated-artifact drift. Untracked files are deliberately not
+        # checked: build output is git-ignored, and the Action bundle is not
+        # committed until M2.
+        run: git diff --exit-code
