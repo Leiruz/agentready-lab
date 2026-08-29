@@ -9,7 +9,6 @@ import type { FixtureDefinition } from "../manifest.js";
 
 import { BASE_API_CATALOG, text } from "./base/valid-agent-site-v1.js";
 import {
-  API_PROFILE_UNPINNED,
   ASSERTIONS_UNASSIGNED,
   COMPAT_ID_UNASSIGNED,
   changed,
@@ -90,7 +89,7 @@ export const apiCatalogCases: readonly FixtureDefinition[] = [
     },
     changedFromBase: [],
     overrides: {},
-    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED, API_PROFILE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED],
   }),
 
   defineFixture({
@@ -109,7 +108,7 @@ export const apiCatalogCases: readonly FixtureDefinition[] = [
     },
     changedFromBase: [],
     overrides: { [PATH]: text(LINKSET, TWO_CONTEXTS) },
-    todos: [ASSERTIONS_UNASSIGNED, API_PROFILE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED],
   }),
 
   defineFixture({

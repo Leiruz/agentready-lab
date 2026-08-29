@@ -343,7 +343,19 @@ export const base: FixtureBase = {
     [HOME_PATH]: homepage(),
     [ROBOTS_PATH]: text("text/plain; charset=utf-8", BASE_ROBOTS),
     [SITEMAP_PATH]: text("application/xml; charset=utf-8", BASE_SITEMAP),
-    [API_CATALOG_PATH]: text("application/linkset+json", BASE_API_CATALOG),
+    // RFC 9727 section 4.2: "The Linkset SHOULD include a profile parameter
+    // (Section 5 of [RFC9264]) with a Profile URI [RFC7284] value of
+    // \"https://www.rfc-editor.org/info/rfc9727\"". Retrieved and read from
+    // the RFC on 2026-08-29. An earlier revision of this fixture served no
+    // profile parameter on the belief that no repository document recorded
+    // the URI; RFC 9727 records it, and rfc9727 is already in the source
+    // ledger. Without it api-catalog.profile, a recommended assertion, is
+    // observably unmet and api-001 could never reach the pass the fixture
+    // catalog states.
+    [API_CATALOG_PATH]: text(
+      'application/linkset+json;profile="https://www.rfc-editor.org/info/rfc9727"',
+      BASE_API_CATALOG,
+    ),
     [SKILLS_INDEX_PATH]: text(
       "application/json; charset=utf-8",
       BASE_SKILLS_INDEX,

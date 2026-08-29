@@ -239,7 +239,10 @@ describe("declared expectations", () => {
       "catalog-names-no-such-assertion": 1,
       "collateral-outcome-undecided": 3,
       "compat-assertion-id-unassigned": 25,
-      "pinned-value-unknown": 9,
+      // Was 9. RFC 9727 section 4.2 was read on 2026-08-29 and does record the
+      // api-catalog Profile URI, so the two api-catalog cases that claimed it
+      // was unrecorded were resolved and the base now advertises it.
+      "pinned-value-unknown": 7,
       "rule-input-unpinned": 6,
     });
   });

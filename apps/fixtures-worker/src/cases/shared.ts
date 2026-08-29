@@ -41,13 +41,6 @@ export const SKILLS_SHAPE_UNPINNED: FixtureTodo = {
     "No repository document records the v0.2.0 $schema identifier, field spelling, or type vocabulary. See AGENT_SKILLS_V0_2_0_SCHEMA in src/cases/base/valid-agent-site-v1.ts.",
 };
 
-/** The RFC 9727 profile URI is not recorded, so the base cannot advertise it. */
-export const API_PROFILE_UNPINNED: FixtureTodo = {
-  kind: "pinned-value-unknown",
-  detail:
-    "api-catalog.profile is a recommended assertion about the RFC 9727 profile URI. No repository document records that URI, so the base serves no profile parameter and this case's stated status does not anticipate the resulting recommendation.",
-};
-
 export function changed(
   mode: Mode,
   rule: RuleId,

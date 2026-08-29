@@ -87,8 +87,14 @@ describe("the base origin", () => {
   it("serves a valid API Catalog", async () => {
     const response = get("/.well-known/api-catalog");
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe(
-      "application/linkset+json",
+    // RFC 9727 section 4.2 says the Linkset SHOULD carry a profile parameter
+    // whose value is the api-catalog Profile URI. api-catalog.profile is a
+    // recommended assertion, so a base origin without it is observably not
+    // following the RFC and api-001 could never reach pass.
+    const contentType = response.headers.get("content-type");
+    expect(contentType).toContain("application/linkset+json");
+    expect(contentType).toContain(
+      'profile="https://www.rfc-editor.org/info/rfc9727"',
     );
 
     const document: {
