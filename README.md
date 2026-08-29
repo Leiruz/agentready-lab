@@ -68,7 +68,11 @@ Milestone 1, the deterministic local CLI, is built and substantially complete:
 
 - Eight rules, all `supported`: robots, sitemap discovery, HTTP Link discovery,
   Markdown negotiation, AI crawler policy, Content Signals, API Catalog, and
-  Agent Skills Discovery.
+  Agent Skills Discovery. The last is an independent implementation of the
+  Agent Skills draft's Discovery Index and Index Format sections, not of the
+  draft: its HTTP Considerations server requirements are unchecked, and its
+  Client Implementation, Archive Safety and Security Considerations sections
+  bind a skills client rather than a published origin.
 - Human-readable and canonical JSON output.
 - No LLM in the verdict path.
 - `check`, `rules list`, and `rules explain`, with exit codes 0, 1, 2, and 4.

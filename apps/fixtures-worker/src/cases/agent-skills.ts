@@ -139,9 +139,9 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
 
   defineFixture({
     id: "skl-005",
-    title: "Entry URL is not absolute",
+    title: "Entry URL is not a valid URI-reference",
     condition:
-      "The entry URL is not an absolute HTTP(S) URL where the pinned draft requires one; the finding must carry a JSON Pointer.",
+      "The entry URL is not a valid RFC 3986 URI-reference; the finding must carry a JSON Pointer.",
     catalogSection: SECTION,
     classification: "normative",
     layer: "a",
@@ -155,7 +155,16 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
     overrides: {
       [SKILLS_INDEX_PATH]: text(
         JSON_TYPE,
-        skillsIndex([{ ...BASE_SKILL_ENTRY, url: SKILL_ARTIFACT_PATH }]),
+        // A raw space in the authority, which RFC 3986 permits nowhere in a
+        // URI-reference. An earlier revision overrode the url with
+        // SKILL_ARTIFACT_PATH and called that "not absolute", but the draft's
+        // URL Resolution section says a url "may be" path-absolute, absolute
+        // or relative and gives a path-absolute example, so that override was
+        // valid and passed. This one is the malformed reference the catalog's
+        // "URL validation without fetching" purpose needs.
+        skillsIndex([
+          { ...BASE_SKILL_ENTRY, url: "http://exa mple.invalid/skill.md" },
+        ]),
       ),
     },
     todos: [ASSERTIONS_UNASSIGNED],

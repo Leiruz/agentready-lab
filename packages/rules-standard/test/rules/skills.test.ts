@@ -57,13 +57,17 @@ import { analyzeSkillsIndex, skillsRule } from "../../src/rules/skills.js";
  * proves that, so the disagreement is localized and visible rather than
  * hidden by a rule that accepts both spellings.
  *
- * `skl-005` DISAGREES WITH THE PINNED DRAFT IN THE SAME WAY. The catalog and
- * the fixture describe it as "not an absolute HTTP(S) URL where the pinned
- * draft requires one" and override the entry `url` with a path-absolute
- * reference. The draft's `url` "may be path-absolute, absolute, or relative",
- * so that override is valid and is `pass`; the case is reproduced below with
- * a reference that is genuinely malformed, which is the behaviour the catalog
- * names in its purpose column ("URL validation without fetching").
+ * `skl-005` used to disagree with the pinned draft in the same way, and no
+ * longer does. The catalog and the fixture described it as "not an absolute
+ * HTTP(S) URL where the pinned draft requires one" and overrode the entry
+ * `url` with a path-absolute reference, which the draft's URL Resolution
+ * section permits: a `url` "may be" path-absolute, absolute, or relative, and
+ * `/.well-known/agent-skills/code-review/SKILL.md` is one of its own examples.
+ * That override passed. Both now describe what the catalog's purpose column
+ * always named ("URL validation without fetching"), and the fixture overrides
+ * the `url` with a reference that is not a valid RFC 3986 URI-reference. The
+ * `skl-005` block below holds both halves: the malformed reference fails, and
+ * the path-absolute one the fixture used to carry still passes.
  */
 
 const ORIGIN = DEFAULT_TARGET.origin;
@@ -429,6 +433,15 @@ describe("skl-005: an entry URL that is not a valid reference", () => {
     expectRequests(run, [{ url: INDEX_URL }, { url: LEGACY_URL }]);
   });
 
+  it("passes a path-absolute url, which the draft explicitly permits", async () => {
+    // What the fixture overrode the `url` with before it was corrected. The
+    // draft's URL Resolution section says a `url` "may be" path-absolute,
+    // absolute, or relative, so the old override could never have produced
+    // the fail its own description claimed.
+    const run = await scan(served(indexBody([entry({ url: ARTIFACT_PATH })])));
+    expectStatus(run, "pass");
+  });
+
   it("computes the precise JSON Pointer the catalog asks for", () => {
     expect(
       analyzeSkillsIndex(
@@ -762,14 +775,6 @@ describe("the fixture worker's own base index", () => {
     const run = await scan(served(body));
     expectStatus(run, "fail");
     expect(statusesOf(run)["skills.path-schema"]).toBe("fail");
-  });
-
-  it("passes the skl-005 override, which the draft explicitly permits", async () => {
-    // The fixture overrides the entry `url` with `SKILL_ARTIFACT_PATH`, a
-    // path-absolute reference, and expects `fail`. The draft says a `url`
-    // "may be path-absolute, absolute, or relative".
-    const run = await scan(served(indexBody([entry({ url: ARTIFACT_PATH })])));
-    expectStatus(run, "pass");
   });
 });
 

@@ -39,9 +39,21 @@ import {
  * is the authority for it, and the two are moved together or the registry test
  * fails.
  *
- * The pinned draft this rule implements is transcribed once, in
+ * WHAT THIS RULE IMPLEMENTS IS THE DRAFT'S DISCOVERY INDEX AND INDEX FORMAT
+ * SECTIONS, not the draft. The part it implements is transcribed once, in
  * `src/data/agent-skills-v0.2.0.ts`, with the ledger commit that is its
  * provenance. Nothing about the schema is decided here.
+ *
+ * The draft also carries directly checkable server-side MUSTs in its HTTP
+ * Considerations section that this rule checks none of: the `application/json`
+ * content type on the index, the `text/markdown`, `text/plain`,
+ * `application/gzip` and `application/zip` types on artifacts, `GET` and `HEAD`
+ * support, and 404 for a skill or file that does not exist. Its Client
+ * Implementation, Archive Safety and Security Considerations sections bind a
+ * skills client rather than a published origin, and this scanner is neither.
+ * A pass here is a statement about an index document and about nothing else in
+ * the draft. See `INDEX_ACCEPT` and the ruleset `todo` for why the media type
+ * is recorded as a gap rather than checked.
  *
  * `skills.archive-safety` IS DEFERRED AND PRODUCES NOTHING. It is absent from
  * `ASSERTION_ORDER` below, so this rule returns three outcomes and never four.
@@ -109,10 +121,37 @@ const LEGACY_OBSERVATION = "well-known-skills-legacy";
 const MAX_INDEX_BYTES = 262_144;
 
 /**
- * A request preference, not an assertion. The pinned draft states no media
- * type for the index, so unlike `web.discovery.api-catalog` this rule checks
- * no `Content-Type` at all: requiring one would be a normative `fail` for a
- * requirement nothing published states.
+ * A request preference, not an assertion.
+ *
+ * THE DRAFT DOES STATE A MEDIA TYPE, AND THIS RULE STILL CHECKS NO
+ * `Content-Type`. An earlier revision of this comment said the draft states
+ * none, which was false. Its HTTP Considerations section opens "Servers MUST:"
+ * and the first entry is "Serve /.well-known/agent-skills/index.json with
+ * application/json content type". The claim came from the
+ * `agent-skills-discovery-v0.2.0` ledger note, which had been written from the
+ * Discovery Index section alone; that entry now records this section.
+ *
+ * What is missing is not the requirement. It is somewhere to report it.
+ * `specs/ruleset.standard.v0.yaml` declares `skills.path-schema`,
+ * `skills.entry` and `skills.digest`, and none of the three is about a
+ * response header: `skills.path-schema` is the request path and the document
+ * shape, `skills.entry` is the entry fields, `skills.digest` is the interop
+ * hash of artifact bytes. Reporting a media-type violation on one of them
+ * would render a finding whose cited requirement text does not mention media
+ * types, and `specs/remediation.v0.yaml` and `specs/templates.v0.yaml` are
+ * keyed by assertion id, so the remediation and the message would be wrong
+ * with it. This is the mirror of the mistake above and not an improvement on
+ * it: one asserted less than the draft says, the other would claim an
+ * authority the ruleset never granted.
+ *
+ * So the gap is recorded rather than closed. Checking the media type needs a
+ * new assertion with its own `source_refs`, remediation entry, four message
+ * templates and a fixture, which is a ruleset decision and not a change to
+ * this file. The ruleset's own `todo` carries it, together with the three
+ * further server MUSTs in the same section that nothing here asserts: the
+ * `SKILL.md` and archive content types, `GET` and `HEAD` support, and 404 for
+ * a skill that does not exist. Until then, `application/json` travels as a
+ * request preference and no verdict rests on what comes back in the header.
  */
 const INDEX_ACCEPT = "application/json";
 
@@ -498,7 +537,7 @@ export const skillsRule: RuleDefinition = {
         deferred: {
           adr: "ADR-0010",
           reason:
-            "Two independent reasons, either of which is sufficient. Uncited: agent-skills-discovery-v0.2.0 defines the archive entry type and the digest over an artifact's raw bytes and states no size, file-count, path, link or compression-ratio limit. Those limits are docs/THREAT_MODEL.md section 19.6, which is this project's own control rather than a ledger source. Unevaluable: section 19.6 also records that the MVP does not unpack an archive at all, so nothing observes the metadata this assertion is about. An uninspected archive reported as pass would be a claim the scanner never checked, and reported as fail would be a claim about a target that did nothing wrong.",
+            "Two independent reasons, either of which is sufficient. Uncited: this assertion's text sets five limits and agent-skills-discovery-v0.2.0 supports two of them. Its Archive Safety section does state path and link rules: an archive MUST NOT contain path traversal sequences or absolute paths, and a client unpacking one MUST reject archives containing symlinks or hard links that resolve outside the skill directory. What the draft states nowhere is a number. It gives no byte size, no file count and no compression ratio, and leaves the total unpacked size as a reasonable limit for the client to choose. Those three numeric limits are docs/THREAT_MODEL.md section 19.6, which is this project's own control rather than a ledger source, so the assertion as written cannot rest on the draft alone. An earlier revision of this reason said the draft states no path or link limit either. That was false, and it came from a ledger note written from the draft's Discovery Index section alone; the entry now records the Archive Safety section it omitted. Unevaluable: section 19.6 also records that the MVP does not unpack an archive at all, so nothing observes the metadata this assertion is about. An uninspected archive reported as pass would be a claim the scanner never checked, and reported as fail would be a claim about a target that did nothing wrong.",
           until:
             "An accepted decision permits unpacking a downloaded skill archive under the controls docs/THREAT_MODEL.md section 19.6 lists, and names the limit values. That decision must also assign source_refs for the limits it sets, which under ADR-0010 section 1 may be a project-policy source provided the assertion is not normative.",
         },

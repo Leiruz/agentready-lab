@@ -42,6 +42,24 @@ todo:
     choosing its own sources, which is what the ruleset supplies; a maintainer
     who wants each of those twenty-five under a decision should say so.
   - >-
+    agent-skills media type, and three further server MUSTs: the pinned draft's
+    HTTP Considerations section says servers MUST serve
+    /.well-known/agent-skills/index.json with an application/json content type,
+    and agent.discovery.skills declares no assertion that could report it.
+    skills.path-schema is the path and the document shape, skills.entry is the
+    entry fields and skills.digest is the interop hash of artifact bytes, so a
+    Content-Type finding on any of the three would cite a requirement text that
+    does not mention media types, and specs/remediation.v0.yaml and
+    specs/templates.v0.yaml are keyed by that same assertion id, so the
+    remediation and the rendered message would be wrong with it. Checking it
+    needs a new assertion with its own source_refs, remediation entry, four
+    message templates and a fixture, which is a decision and not an edit. The
+    same section carries three more server MUSTs this ruleset asserts nothing
+    about: the SKILL.md and archive content types, GET and HEAD support, and
+    404 for a skill or file that does not exist. Until a decision adds them,
+    every one of them is a requirement of the draft that a passing
+    agent.discovery.skills verdict says nothing about.
+  - >-
     per-assertion source_refs, section pointers: a citation carries a section
     only where a repository document already pins that section for that
     subject. rfc7763 section 2 and rfc9110 section 12.5.5 are
@@ -867,11 +885,22 @@ rules:
             adr: "ADR-0010"
             reason: >-
               Two independent reasons, either of which is sufficient.
-              Uncited: agent-skills-discovery-v0.2.0 defines the archive entry
-              type and the digest over an artifact's raw bytes and states no
-              size, file-count, path, link or compression-ratio limit. Those
-              limits are docs/THREAT_MODEL.md section 19.6, which is this
-              project's own control rather than a ledger source.
+              Uncited: this assertion's text sets five limits and
+              agent-skills-discovery-v0.2.0 supports two of them. Its Archive
+              Safety section does state path and link rules: an archive MUST
+              NOT contain path traversal sequences or absolute paths, and a
+              client unpacking one MUST reject archives containing symlinks or
+              hard links that resolve outside the skill directory. What the
+              draft states nowhere is a number. It gives no byte size, no file
+              count and no compression ratio, and leaves the total unpacked
+              size as a reasonable limit for the client to choose. Those three
+              numeric limits are docs/THREAT_MODEL.md section 19.6, which is
+              this project's own control rather than a ledger source, so the
+              assertion as written cannot rest on the draft alone. An earlier
+              revision of this reason said the draft states no path or link
+              limit either. That was false, and it came from a ledger note
+              written from the draft's Discovery Index section alone; the
+              entry now records the Archive Safety section it omitted.
               Unevaluable: section 19.6 also records that the MVP does not
               unpack an archive at all, so nothing observes the metadata this
               assertion is about. An uninspected archive reported as pass would

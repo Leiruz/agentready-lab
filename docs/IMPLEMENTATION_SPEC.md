@@ -1000,11 +1000,22 @@ permit it.
 
 ### 22.8 Agent Skills Discovery
 
-- Implements the pinned Cloudflare draft v0.2.0.
+- Implements the Discovery Index and Index Format sections of the pinned
+  Cloudflare draft v0.2.0, and not the draft as a whole.
 - Validates `$schema`, entry names, types, URLs, and SHA-256 digest syntax.
 - In interop mode only, fetches an artifact within budget and verifies its
   digest without executing it.
 - Treats the legacy path as compatibility behavior, not v0.2 conformance.
+- Checks none of the draft's HTTP Considerations server MUSTs, which are
+  directly checkable and are not checked: the `application/json` content type
+  on the index, the artifact content types, `GET` and `HEAD` support, and 404
+  for a skill or file that does not exist. `specs/ruleset.standard.v0.yaml`
+  declares no assertion any of them could be reported against, and its `todo`
+  records the gap.
+- Implements nothing from the draft's Client Implementation, Archive Safety, or
+  Security Considerations sections. Those bind a skills client rather than a
+  published origin, and `skills.archive-safety` is deferred under ADR-0010
+  section 4 because the MVP never unpacks an archive.
 
 ## 23. Milestone definitions
 

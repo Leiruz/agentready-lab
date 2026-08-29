@@ -1,5 +1,12 @@
 /**
- * The pinned Agent Skills Discovery v0.2.0 vocabulary and grammars.
+ * The pinned Agent Skills Discovery v0.2.0 vocabulary and grammars, for the
+ * draft's Discovery Index and Index Format sections.
+ *
+ * THAT IS A SUBSET OF THE DRAFT AND THE SUBSET IS THE POINT. The document also
+ * has HTTP Considerations, Client Implementation, Archive Distribution, Archive
+ * Safety and Security Considerations sections. None of them is encoded here,
+ * because none of them constrains the shape of an index document, which is the
+ * only thing `agent.discovery.skills` reads.
  *
  * EVERY VALUE HERE IS TRANSCRIBED, NONE IS RECALLED. The authority is
  * `specs/sources.v0.yaml`, ledger id `agent-skills-discovery-v0.2.0`, which
@@ -7,15 +14,27 @@
  * `1bd1167983fa5ac9cd47987710c525308eda1a98` (committed 2026-03-24, read
  * 2026-08-29). The ledger `notes` carry the whole of the schema this file
  * encodes, so a reader can check each constant against them without leaving
- * the repository and without re-fetching an undated URL.
+ * the repository and without re-fetching an undated URL. They also carry the
+ * draft's other sections, which this file does not encode; a note in that
+ * entry is a record of what the source says and never of what is checked.
  *
  * The draft states version 0.2.0, published 2026-01-17, updated 2026-03-12.
  *
- * NOTHING IS ADDED THAT THE DRAFT DOES NOT DEFINE. There is no media type
- * requirement here, no `version` field, no ordering rule and no size limit on
- * the index, because the pinned notes state none. `agent.discovery.skills`
- * asserts `profile-conformance` against this draft, so a constraint invented
- * in this file would become a normative `fail` nothing published requires.
+ * NOTHING IS ADDED THAT THE DRAFT DOES NOT DEFINE. There is no `version`
+ * field, no ordering rule and no size limit on the index here, because the
+ * draft defines none. `agent.discovery.skills` asserts `profile-conformance`
+ * against this draft, so a constraint invented in this file would become a
+ * normative `fail` nothing published requires.
+ *
+ * THE MEDIA TYPE IS ABSENT FOR THE OPPOSITE REASON, and an earlier revision of
+ * this comment got it wrong: it listed the media type alongside the three
+ * above as something "the pinned notes state none" of. The notes stated none
+ * because they had been written from the Discovery Index section alone. The
+ * draft's HTTP Considerations section does state one, and servers MUST "Serve
+ * /.well-known/agent-skills/index.json with application/json content type". It
+ * is still not encoded here, because no assertion in
+ * `specs/ruleset.standard.v0.yaml` could report a violation of it. See
+ * `INDEX_ACCEPT` in `../rules/skills.ts` and the ruleset's `todo`.
  *
  * CHANGING ANY VALUE IS A VERSION CHANGE, not an edit: a new draft revision is
  * a new ledger `verified_at`, a new `version`, a `rule_version` bump on

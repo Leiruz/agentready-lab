@@ -26,7 +26,7 @@ export const PINNED_RULESET = {
   id: "standard",
   version: "0.4.0",
   digest:
-    "sha256:49c06c83688b50d6e2a9c0d8677d9e02a299a257ed45194cb8285683d6b125ab",
+    "sha256:8919828c825c1e886b518e0364bac80ff02c53f7dca360399e6e68f586bc1195",
 } as const;
 
 /** ADR-0007: the axis a report carries in place of a ledger digest. */
@@ -376,7 +376,7 @@ export const PINNED_ASSERTIONS: readonly RulesetAssertion[] = [
     deferred: {
       adr: "ADR-0010",
       reason:
-        "Two independent reasons, either of which is sufficient. Uncited: agent-skills-discovery-v0.2.0 defines the archive entry type and the digest over an artifact's raw bytes and states no size, file-count, path, link or compression-ratio limit. Those limits are docs/THREAT_MODEL.md section 19.6, which is this project's own control rather than a ledger source. Unevaluable: section 19.6 also records that the MVP does not unpack an archive at all, so nothing observes the metadata this assertion is about. An uninspected archive reported as pass would be a claim the scanner never checked, and reported as fail would be a claim about a target that did nothing wrong.",
+        "Two independent reasons, either of which is sufficient. Uncited: this assertion's text sets five limits and agent-skills-discovery-v0.2.0 supports two of them. Its Archive Safety section does state path and link rules: an archive MUST NOT contain path traversal sequences or absolute paths, and a client unpacking one MUST reject archives containing symlinks or hard links that resolve outside the skill directory. What the draft states nowhere is a number. It gives no byte size, no file count and no compression ratio, and leaves the total unpacked size as a reasonable limit for the client to choose. Those three numeric limits are docs/THREAT_MODEL.md section 19.6, which is this project's own control rather than a ledger source, so the assertion as written cannot rest on the draft alone. An earlier revision of this reason said the draft states no path or link limit either. That was false, and it came from a ledger note written from the draft's Discovery Index section alone; the entry now records the Archive Safety section it omitted. Unevaluable: section 19.6 also records that the MVP does not unpack an archive at all, so nothing observes the metadata this assertion is about. An uninspected archive reported as pass would be a claim the scanner never checked, and reported as fail would be a claim about a target that did nothing wrong.",
       until:
         "An accepted decision permits unpacking a downloaded skill archive under the controls docs/THREAT_MODEL.md section 19.6 lists, and names the limit values. That decision must also assign source_refs for the limits it sets, which under ADR-0010 section 1 may be a project-policy source provided the assertion is not normative.",
     },

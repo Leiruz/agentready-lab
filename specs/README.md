@@ -349,8 +349,11 @@ module fails CI rather than shipping. It deliberately does not project
 `checks.v0.yaml`, which is never read at scan time.
 
 Each canonical projection excludes what cannot change a verdict: titles, prose
-deltas, caveats, and `interop`. Fixing a typo in a caveat must not invalidate every
-pinned report. Neither the ledger nor the remediation file has a digest;
+deltas, caveats, `interop`, and the prose of a deferral. Fixing a typo in a
+caveat must not invalidate every pinned report. A deferral keeps its `adr` and
+the marker itself, because a deferred assertion produces no finding of any
+status; its `reason` and `until` are sentences a maintainer reads and stay
+out. Neither the ledger nor the remediation file has a digest;
 ADR-0007 puts `sourceLedgerVersion` in the report instead, and remediation
 decides no verdict at all.
 

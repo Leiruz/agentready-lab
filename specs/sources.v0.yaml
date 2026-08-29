@@ -446,6 +446,70 @@ sources:
         or archive. digest is sha256: followed by 64 lowercase hex characters
         over the artifact's raw bytes. url resolves per RFC 3986 section 5
         against the index URL and may be path-absolute, absolute, or relative.
+      - >-
+        THE FOUR NOTES ABOVE COVER THE DISCOVERY INDEX AND INDEX FORMAT
+        SECTIONS AND NOTHING ELSE. They were written on 2026-08-29 from those
+        sections alone, and the omission was not visible from the entry: a
+        reader met a note that read like the whole draft. Code and an accepted
+        decision then made three claims about what the draft "states no"
+        which the omitted sections contradict. The notes below were added on
+        2026-08-29 after re-reading the pinned commit end to end, so that the
+        next reader inherits the document rather than one section of it. A
+        note here is a record of what the source says, never of what this
+        project checks.
+      - >-
+        Integrity and Verification. Clients MUST verify downloaded content
+        against the digest in the index, and MUST NOT use unverified content.
+        The draft names two uses: change detection against a cached digest,
+        and download verification by hashing the fetched bytes.
+      - >-
+        HTTP Considerations, servers. Five MUSTs, quoted: "Serve
+        /.well-known/agent-skills/index.json with application/json content
+        type"; "Serve SKILL.md files with text/markdown or text/plain content
+        type"; "Serve .tar.gz archives with application/gzip content type and
+        .zip archives with application/zip content type"; "Support GET and
+        HEAD methods"; "Return 404 Not Found for skills or files that do not
+        exist". Servers SHOULD set appropriate Cache-Control headers, and
+        SHOULD include CORS headers if skills are intended for consumption by
+        browser-based clients.
+      - >-
+        HTTP Considerations, clients. Clients MUST handle redirects (3xx
+        responses) and MUST respect cache headers.
+      - >-
+        Client Implementation. Seven numbered client MUSTs: fetch index.json;
+        check the schema version; use digests for caching; fetch and verify
+        skill artifacts, computing SHA-256 against the declared digest and,
+        for an archive, unpacking and validating its structure; apply
+        progressive disclosure; cache aggressively; and gate script execution,
+        where "Clients SHALL NOT execute files under scripts/ by default".
+      - >-
+        Archive Distribution. Archives SHOULD be .tar.gz or .zip and clients
+        MUST support at least both. The archive contents are the skill
+        directory, placed at the archive root rather than inside a wrapper
+        directory, and the archive MUST contain a SKILL.md file at the root.
+      - >-
+        Archive Safety. THE DRAFT DOES STATE PATH AND LINK RULES. Under
+        Archive Structure, the archive "MUST NOT contain path traversal
+        sequences (..) or absolute paths". Under Archive Safety, a client
+        unpacking an archive MUST "Reject archives containing path traversal
+        sequences (..) or absolute paths" and MUST "Reject archives containing
+        symlinks or hard links that resolve outside the skill directory", and
+        MUST "Consider enforcing a reasonable limit on total unpacked size to
+        prevent denial-of-service via decompression bombs". What the draft
+        states nowhere is a number. There is no byte size, no file count and
+        no compression ratio in it, and the unpacked-size limit is left as
+        "reasonable" for the client to choose.
+      - >-
+        Security Considerations. RFC 8615 section 4 applies. Origin
+        allowlisting: clients SHOULD "maintain a configurable allowlist of
+        trusted domains from which skills may be fetched", and skills from
+        origins not on the allowlist SHOULD be rejected unless the user
+        explicitly approves them. Prompt injection: skill content is loaded
+        directly into agent context, so clients SHOULD validate that artifacts
+        originate from trusted, allowlisted domains before loading them. The
+        section also restates the digest-verification MUST, the archive-safety
+        MUSTs including symlinks and hard links, and the SHALL NOT on
+        executing files under scripts/.
 
   - id: "webmcp-cg"
     title: "WebMCP API"
