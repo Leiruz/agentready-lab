@@ -2,10 +2,12 @@
  * `docs/FIXTURE_CATALOG.md` section 12. Rule `agent.discovery.skills`.
  *
  * `agent.discovery.skills` is not in the `content` profile, so every case here
- * selects `agent-service`. Every case also carries `SKILLS_SHAPE_UNPINNED`:
- * no repository document records the v0.2.0 `$schema` identifier, field
- * spelling, or type vocabulary, so the document shape below follows the only
- * pinned prose there is, the `skills.entry` requirement text.
+ * selects `agent-service`. The document shape follows the pinned draft: the
+ * ledger entry `agent-skills-discovery-v0.2.0` records the schema at commit
+ * 1bd1167983fa5ac9cd47987710c525308eda1a98, read on 2026-08-29. An earlier
+ * revision of these cases predated that pin and carried a placeholder
+ * `$schema`, a `sha256` member holding bare hex, and a `type` the draft does
+ * not define, so the known-good base was not a valid v0.2.0 index at all.
  */
 import { defineFixture } from "../manifest.js";
 import type { FixtureDefinition } from "../manifest.js";
@@ -21,7 +23,6 @@ import {
 import {
   ASSERTIONS_UNASSIGNED,
   COMPAT_ID_UNASSIGNED,
-  SKILLS_SHAPE_UNPINNED,
   changed,
 } from "./shared.js";
 
@@ -59,7 +60,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
     },
     changedFromBase: [],
     overrides: {},
-    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED],
   }),
 
   defineFixture({
@@ -82,7 +83,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
         skillsIndex([BASE_SKILL_ENTRY], { schema: null }),
       ),
     },
-    todos: [ASSERTIONS_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED],
   }),
 
   defineFixture({
@@ -106,7 +107,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
         skillsIndex([{ ...BASE_SKILL_ENTRY, sha256: "SHA1:D6B0EF7410" }]),
       ),
     },
-    todos: [ASSERTIONS_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED],
   }),
 
   defineFixture({
@@ -133,7 +134,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
         skillsIndex([BASE_SKILL_ENTRY]),
       ),
     },
-    todos: [COMPAT_ID_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [COMPAT_ID_UNASSIGNED],
   }),
 
   defineFixture({
@@ -157,7 +158,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
         skillsIndex([{ ...BASE_SKILL_ENTRY, url: SKILL_ARTIFACT_PATH }]),
       ),
     },
-    todos: [ASSERTIONS_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED],
   }),
 
   defineFixture({
@@ -179,7 +180,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
       changed("compat", RULE, "fail"),
     ],
     overrides: { [SKILLS_INDEX_PATH]: { kind: "absent" } },
-    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED, COMPAT_ID_UNASSIGNED],
   }),
 
   defineFixture({
@@ -204,6 +205,6 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
     overrides: {
       [SKILL_ARTIFACT_PATH]: text(PLAIN, MISMATCHED_SKILL_ARTIFACT),
     },
-    todos: [ASSERTIONS_UNASSIGNED, SKILLS_SHAPE_UNPINNED],
+    todos: [ASSERTIONS_UNASSIGNED],
   }),
 ];

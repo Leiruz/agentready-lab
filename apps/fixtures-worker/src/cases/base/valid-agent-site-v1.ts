@@ -222,7 +222,7 @@ export const BASE_OPENAPI = lines(
  * case carries a `pinned-value-unknown` todo pointing here.
  */
 export const AGENT_SKILLS_V0_2_0_SCHEMA =
-  "https://unpinned.invalid/agent-skills-discovery/v0.2.0/index.schema.json";
+  "https://schemas.agentskills.io/discovery/0.2.0/schema.json";
 
 export const SKILL_ARTIFACT_PATH =
   "/.well-known/agent-skills/artifacts/hello-world.txt";
@@ -247,15 +247,21 @@ export interface SkillEntry {
   readonly type: string;
   readonly description: string;
   readonly url: string;
-  readonly sha256: string;
+  readonly digest: string;
 }
 
 export const BASE_SKILL_ENTRY: SkillEntry = {
   name: "hello-world",
-  type: "skill",
+  // The draft defines exactly two distribution types, `skill-md` and
+  // `archive`. An earlier revision of this fixture used `skill`, which the
+  // draft does not define.
+  type: "skill-md",
   description: "A fixed fixture skill that does nothing.",
   url: `{{origin}}${SKILL_ARTIFACT_PATH}`,
-  sha256: SKILL_ARTIFACT_SHA256,
+  // `digest`, prefixed, per the draft. An earlier revision spelled the member
+  // `sha256` and carried bare hex, so the known-good base was not a valid
+  // v0.2.0 index and `skl-001` could never reach the pass its case states.
+  digest: `sha256:${SKILL_ARTIFACT_SHA256}`,
 };
 
 export function skillsIndex(
@@ -278,7 +284,7 @@ export function skillsIndex(
       `      "type": ${JSON.stringify(entry.type)},`,
       `      "description": ${JSON.stringify(entry.description)},`,
       `      "url": ${JSON.stringify(entry.url)},`,
-      `      "sha256": ${JSON.stringify(entry.sha256)}`,
+      `      "digest": ${JSON.stringify(entry.digest)}`,
       index === entries.length - 1 ? "    }" : "    },",
     ]),
     "  ]",

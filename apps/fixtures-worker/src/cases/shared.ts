@@ -34,13 +34,6 @@ export const CRAWLER_DATASET_UNPINNED: FixtureTodo = {
     "docs/FIXTURE_CATALOG.md section 9 requires a small crawler-name dataset pinned with its source date. No such dataset exists in specs/, so the product token in these bodies is fixture content and not a pinned classification input.",
 };
 
-/** The Agent Skills Discovery v0.2.0 document shape is not pinned anywhere. */
-export const SKILLS_SHAPE_UNPINNED: FixtureTodo = {
-  kind: "pinned-value-unknown",
-  detail:
-    "No repository document records the v0.2.0 $schema identifier, field spelling, or type vocabulary. See AGENT_SKILLS_V0_2_0_SCHEMA in src/cases/base/valid-agent-site-v1.ts.",
-};
-
 export function changed(
   mode: Mode,
   rule: RuleId,

@@ -117,17 +117,20 @@ describe("the base origin", () => {
       readonly $schema: string;
       readonly skills: readonly {
         readonly url: string;
-        readonly sha256: string;
+        readonly digest: string;
       }[];
     } = await response.json();
     expect(document.$schema.length).toBeGreaterThan(0);
     const entry = document.skills[0];
     expect(entry?.url).toBe(`${ORIGIN}${SKILL_ARTIFACT_PATH}`);
-    expect(entry?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    // The draft requires `sha256:` followed by 64 lowercase hex characters.
+    expect(entry?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const artifact = get(SKILL_ARTIFACT_PATH);
     expect(artifact.status).toBe(200);
-    expect(await sha256Hex(await artifact.text())).toBe(entry?.sha256);
+    expect(`sha256:${await sha256Hex(await artifact.text())}`).toBe(
+      entry?.digest,
+    );
   });
 
   it("pins the artifact digest to the artifact bytes", async () => {
@@ -307,7 +310,7 @@ describe("overrides change only what they declare", () => {
       new Request(`${ORIGIN}${SKILL_ARTIFACT_PATH}`),
     ).text();
     expect(artifact).toBe(MISMATCHED_SKILL_ARTIFACT);
-    expect(index.skills[0]?.sha256).toBe(SKILL_ARTIFACT_SHA256);
+    expect(index.skills[0]?.digest).toBe(`sha256:${SKILL_ARTIFACT_SHA256}`);
     expect(await sha256Hex(artifact)).not.toBe(SKILL_ARTIFACT_SHA256);
   });
 
