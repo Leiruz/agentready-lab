@@ -10,6 +10,13 @@
 # section 2, unchanged except where ADR-0009 section 7 requires an entry
 # to record the state of its source.
 #
+# Every entry but one records a source someone else published. ADR-0010
+# section 1 admits the exception: this project may be the source of its
+# own policy, provided the entry says so in `kind`, in `status`, and in
+# its own notes. A project-policy entry may never carry a normative
+# assertion, and a citation to one is never evidence that anybody outside
+# this repository agrees.
+#
 # `ledger_date` is this file's own clock. Every verified_at is checked
 # against it and not against snapshot.captured_at, because a source is
 # re-verified on a schedule that has nothing to do with the date an
@@ -20,10 +27,52 @@
 # reviewed edit to this line.
 
 schema_version: "0"
-source_ledger_version: "0.3.0"
+source_ledger_version: "0.4.0"
 ledger_date: "2026-08-29"
 
 sources:
+  # The one self-authored entry in this file (ADR-0010 section 1). It is first
+  # so that a reader meets the exception before the thirty-odd external
+  # sources, rather than finding it buried among them.
+  #
+  # It has `document` and no `url` because this project publishes no URL for
+  # its own policy. `verified_at` also means something different here: for an
+  # external source it is the date the source was fetched and read, and for
+  # this one it is the date the policy text and this entry were confirmed to
+  # agree. `version` is the policy's own axis, which is what
+  # links.agent-useful means by "a separately versioned AgentReady Lab
+  # policy".
+
+  - id: "agentready-lab-agent-useful-relations"
+    title: "AgentReady Lab agent-useful relation policy"
+    document: "docs/decisions/0010-project-policy-and-deferred-assertions.md"
+    kind: "project-policy"
+    status: "adopted-policy"
+    version: "0.1.0"
+    verified_at: "2026-08-29"
+    notes:
+      - >-
+        Written by this project. It is not a specification, not a standard, not
+        a convention observed in the wild, and no external body has reviewed or
+        endorsed it. Any finding that rests on it is this project's opinion
+        about which link relations are worth an agent's attention, and must
+        read that way.
+      - >-
+        Policy 0.1.0 classifies exactly three relation names as agent-useful:
+        service-desc, describedby, api-catalog. ADR-0010 section 2 gives the
+        reason for each and records that the set is adopted deliberately rather
+        than inherited from the compatibility heuristic in
+        specs/checks.v0.yaml, which has no authority in spec mode (ADR-0009
+        section 2).
+      - >-
+        The policy classifies. It does not define. RFC 8288 remains the only
+        authority for parsing a Link field and for what a relation name means,
+        and links.parse and links.relation cite rfc8288 for exactly that. This
+        entry may never be cited for a syntax or relation-semantics claim.
+      - >-
+        ADR-0010 section 3 forbids a project-policy source carrying a normative
+        assertion. links.agent-useful is advisory and stays advisory; fixture
+        lnk-005 expects a warning, not a failure.
   - id: "isit-2026-08-28"
     title: "Is Your Site Agent-Ready? — Full Documentation"
     url: "https://isitagentready.com/llms-full.txt"

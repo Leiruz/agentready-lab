@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:agentready-lab:schema:source-ledger:v0",
   "title": "AgentReady Lab source ledger v0",
-  "description": "The independent, versioned record of every pinned source. Every source_refs identifier in specs/checks.v0.yaml and specs/ruleset.standard.v0.yaml resolves against this file and against nothing else (ADR-0008 section 1).",
+  "description": "The independent, versioned record of every pinned source. Every source_refs identifier in specs/checks.v0.yaml and specs/ruleset.standard.v0.yaml resolves against this file and against nothing else (ADR-0008 section 1). Most entries are external; a `project-policy` entry is this project's own policy, admitted by ADR-0010 section 1 and labelled so that it can never be read as someone else's specification.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -49,7 +49,24 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "title", "url", "kind", "status", "verified_at"],
+      "required": ["id", "title", "kind", "status", "verified_at"],
+      "allOf": [
+        {
+          "description": "ADR-0010 section 1. A self-authored source has no published URL and an external source has no repository path, so exactly one of the two locators is present and which one it is follows from `kind`. Fabricating an https URL for this project's own policy is the specific thing this branch exists to make impossible.",
+          "if": {
+            "required": ["kind"],
+            "properties": { "kind": { "const": "project-policy" } }
+          },
+          "then": {
+            "required": ["document", "version", "notes"],
+            "not": { "required": ["url"] }
+          },
+          "else": {
+            "required": ["url"],
+            "not": { "required": ["document"] }
+          }
+        }
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -60,8 +77,14 @@
           "minLength": 1
         },
         "url": {
+          "description": "The published location of an external source. Forbidden on a project-policy source: this project publishes no URL for its own policy, and an https link beside a self-authored entry is provenance a reader would take for someone else's.",
           "type": "string",
           "format": "uri"
+        },
+        "document": {
+          "description": "ADR-0010 section 1. The repository-relative path holding a self-authored source's text. Present only on a project-policy source, and never beside a `url`.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
         },
         "kind": {
           "enum": [
@@ -75,7 +98,8 @@
             "ecosystem-specification",
             "vendor-convention",
             "open-source-profile",
-            "open-proposal"
+            "open-proposal",
+            "project-policy"
           ]
         },
         "status": {
@@ -92,7 +116,8 @@
             "beta",
             "community-report",
             "convention",
-            "living-specification"
+            "living-specification",
+            "adopted-policy"
           ]
         },
         "version": {

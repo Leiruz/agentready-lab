@@ -11,8 +11,8 @@
 
 schema_version: "0"
 ruleset_id: "standard"
-ruleset_version: "0.3.0"
-source_ledger_version: "0.3.0"
+ruleset_version: "0.4.0"
+source_ledger_version: "0.4.0"
 
 todo:
   - >-
@@ -28,14 +28,26 @@ todo:
     parameter schema and authorizes no excerpt. That is the fail-closed state:
     validateOutcomeParams rejects every parameter an assertion does not declare.
   - >-
-    per-assertion source_refs: no accepted decision assigns them. ADR-0002
-    section 6 requires each assertion to carry its authoritative sources and
-    forbids a rule choosing its own; deriving them from the requirement prose
-    would be that same choice made by an implementer instead of by a decision.
-    Every assertion marked "source_refs unassigned" below is waiting on that
-    decision. The exception is web.policy.content-signals, where ADR-0009
-    section 7 requires content-signals-draft-00 in every finding message of the
-    rule.
+    per-assertion source_refs: assigned for the eight M1 rules only, by reading
+    each requirement against specs/sources.v0.yaml. The other fourteen rules
+    still declare none and still carry the per-assertion todo, so no rule
+    outside M1 can be configured. ADR-0010 decides the two M1 attributions that
+    could not be made by reading a source, and records markdown.fidelity as an
+    open question, but no accepted decision records the other twenty-five M1
+    citations one by one. ADR-0002 section 6 requires them and forbids a rule
+    choosing its own sources, which is what the ruleset supplies; a maintainer
+    who wants each of those twenty-five under a decision should say so.
+  - >-
+    per-assertion source_refs, section pointers: a citation carries a section
+    only where a repository document already pins that section for that
+    subject. rfc7763 section 2 and rfc9110 section 12.5.5 are
+    docs/IMPLEMENTATION_SPEC.md section 13's worked report; rfc9727 section 4.1
+    is docs/FIXTURE_CATALOG.md case api-005; rfc9309 section 2.2.4 is ADR-0009
+    section 3; content-signals-draft-00 sections 3 and 4 are that entry's own
+    ledger note. Every other citation names a source and no section, which
+    .claude/rules/standards.md asks for and no repository document supplies.
+    Closing that gap means reading the pinned documents and recording the
+    reading in specs/sources.v0.yaml, not deriving a pointer from memory.
 
 rules:
   - rule_id: "web.discovery.robots"
@@ -58,33 +70,33 @@ rules:
           text: >-
             Request the lowercase /robots.txt path at the origin root and parse
             a successful representation according to RFC 9309.
-          source_refs: []
+          source_refs:
+            - source: "rfc9309"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "robots.syntax"
           strength: "normative"
           text: >-
             Decode the file as UTF-8, recognize user-agent groups, and apply
             matching and precedence rules from RFC 9309.
-          source_refs: []
+          source_refs:
+            - source: "rfc9309"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "robots.not-authz"
           strength: "advisory"
           text: >-
             Report that REP preferences are not access authorization and must
             not protect secrets.
-          source_refs: []
+          source_refs:
+            - source: "rfc9309"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-
@@ -125,11 +137,11 @@ rules:
           text: >-
             Validate the sitemap or sitemap-index root, namespace, URL scope,
             encoding, and protocol limits against the Sitemaps protocol.
-          source_refs: []
+          source_refs:
+            - source: "sitemaps-protocol"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "sitemap.directive"
           strength: "normative"
@@ -137,22 +149,24 @@ rules:
             When discovery starts from a Sitemap record in robots.txt, parse its
             absolute URL and fetch that document before claiming sitemap
             conformance.
-          source_refs: []
+          source_refs:
+            - source: "sitemaps-protocol"
+            - source: "rfc9309"
+              section: "2.2.4"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "sitemap.canonical"
           strength: "recommended"
           text: >-
             Use canonical, absolute URLs and keep last-modified data truthful
             when it is supplied.
-          source_refs: []
+          source_refs:
+            - source: "sitemaps-protocol"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-
@@ -185,7 +199,16 @@ rules:
       when: >-
         The target can advertise machine-readable resources from an HTTP
         response.
-    source_refs: ["isit-2026-08-28", "rfc8288", "rfc9727"]
+    # The self-authored policy is listed last and named for what it is. This
+    # list is an inventory of what the rule rests on; it is never what a
+    # finding cites. ADR-0002 section 6 copies a finding's citations from the
+    # assertion declaration, so no finding can present rfc8288 and the policy
+    # as one authority (ADR-0010 section 3).
+    source_refs:
+      - "isit-2026-08-28"
+      - "rfc8288"
+      - "rfc9727"
+      - "agentready-lab-agent-useful-relations"
     spec:
       claim_scope: "normative-conformance"
       requirements:
@@ -195,33 +218,34 @@ rules:
             Parse every Link field using RFC 8288, including multiple field
             lines, commas, quoted parameters, relative targets, and anchor
             context.
-          source_refs: []
+          source_refs:
+            - source: "rfc8288"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "links.relation"
           strength: "normative"
           text: >-
             Interpret registered relation names and extension relation URIs
             according to RFC 8288 rather than a substring search.
-          source_refs: []
+          source_refs:
+            - source: "rfc8288"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "links.agent-useful"
           strength: "advisory"
           text: >-
             Classify selected discovery relations as agent-useful under a
             separately versioned AgentReady Lab policy.
-          source_refs: []
+          source_refs:
+            - source: "agentready-lab-agent-useful-relations"
+              section: "2"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-
@@ -330,11 +354,12 @@ rules:
           text: >-
             When this profile selects Markdown, return a valid text/markdown
             Content-Type as registered by RFC 7763.
-          source_refs: []
+          source_refs:
+            - source: "rfc7763"
+              section: "2"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "markdown.negotiation"
           strength: "normative"
@@ -342,33 +367,34 @@ rules:
             Respect HTTP content negotiation without changing the resource's
             meaning or returning Markdown to an HTML-only request solely because
             a test is present.
-          source_refs: []
+          source_refs:
+            - source: "rfc9110"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "markdown.vary"
           strength: "recommended"
           text: >-
             Include Accept in Vary when caches could otherwise reuse one
             representation for the other.
-          source_refs: []
+          source_refs:
+            - source: "rfc9110"
+              section: "12.5.5"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "markdown.fidelity"
           strength: "advisory"
           text: >-
             Check that critical headings, links, code, and factual text remain
             represented without invented content.
-          source_refs: []
+          source_refs:
+            - source: "rfc9110"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-
@@ -414,22 +440,24 @@ rules:
           text: >-
             Parse group selection and allow/disallow precedence with RFC 9309
             before reporting the effective policy for a named token.
-          source_refs: []
+          source_refs:
+            - source: "rfc9309"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "ai-rules.token-source"
           strength: "advisory"
           text: >-
             Version and cite the external crawler-token registry used for
             classification.
-          source_refs: []
+          source_refs:
+            - source: "openai-crawlers"
+            - source: "google-crawlers"
+            - source: "anthropic-crawlers"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "ai-rules.effective-access"
           strength: "recommended"
@@ -439,11 +467,11 @@ rules:
             the default decision when no group matches, and report a disallowed
             decision as a warning about agent reachability rather than as a
             protocol failure.
-          source_refs: []
+          source_refs:
+            - source: "rfc9309"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-
@@ -489,12 +517,10 @@ rules:
             yes or no policy.
           source_refs:
             - source: "content-signals-draft-00"
+              section: "3"
           params: []
           excerpt_authorized: false
           todo:
-            - >-
-              source_refs beyond content-signals-draft-00 unassigned; see the
-              ruleset todo
             - "params unassigned; see the ruleset todo"
         - id: "content-signals.effect"
           strength: "advisory"
@@ -503,12 +529,10 @@ rules:
             prohibition, or verified recipient behavior.
           source_refs:
             - source: "content-signals-draft-00"
+            - source: "content-signals"
           params: []
           excerpt_authorized: false
           todo:
-            - >-
-              source_refs beyond content-signals-draft-00 unassigned; see the
-              ruleset todo
             - "params unassigned; see the ruleset todo"
         - id: "content-signals.conflicting-declaration"
           strength: "advisory"
@@ -519,12 +543,11 @@ rules:
             unresolved state instead of selecting a winner.
           source_refs:
             - source: "content-signals-draft-00"
+            - source: "rfc9309"
+              section: "2.2.4"
           params: []
           excerpt_authorized: false
           todo:
-            - >-
-              source_refs beyond content-signals-draft-00 unassigned; see the
-              ruleset todo
             - "params unassigned; see the ruleset todo"
         - id: "content-signals.unrecognized-vocabulary"
           strength: "advisory"
@@ -537,15 +560,13 @@ rules:
             any pinned specification.
           source_refs:
             - source: "content-signals-draft-00"
+              section: "4"
           params:
             - name: "recognized-token-count"
               kind: "count"
               required: true
           excerpt_authorized: false
           todo:
-            - >-
-              source_refs beyond content-signals-draft-00 unassigned; see the
-              ruleset todo
             - >-
               excerpt_authorized: ADR-0009 sections 4 and 5 require the declared
               tokens to be recorded verbatim as bounded sanitized evidence,
@@ -803,22 +824,22 @@ rules:
           text: >-
             Use /.well-known/agent-skills/index.json and the exact v0.2.0 schema
             identifier and document shape.
-          source_refs: []
+          source_refs:
+            - source: "agent-skills-discovery-v0.2.0"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "skills.entry"
           strength: "normative"
           text: >-
             Validate each skill name, allowed type, description, URL, and sha256
             digest syntax required by v0.2.0.
-          source_refs: []
+          source_refs:
+            - source: "agent-skills-discovery-v0.2.0"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "skills.digest"
           strength: "normative"
@@ -826,11 +847,11 @@ rules:
             When a skill artifact is fetched in interop mode, hash the bounded
             bytes and require the declared lowercase hexadecimal SHA-256 digest
             to match.
-          source_refs: []
+          source_refs:
+            - source: "agent-skills-discovery-v0.2.0"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "skills.archive-safety"
           strength: "recommended"
@@ -838,11 +859,28 @@ rules:
             Inspect archive metadata under strict size, file-count, path, link,
             and compression-ratio limits without executing content.
           source_refs: []
+          deferred:
+            adr: "ADR-0010"
+            reason: >-
+              Two independent reasons, either of which is sufficient.
+              Uncited: agent-skills-discovery-v0.2.0 defines the archive entry
+              type and the digest over an artifact's raw bytes and states no
+              size, file-count, path, link or compression-ratio limit. Those
+              limits are docs/THREAT_MODEL.md section 19.6, which is this
+              project's own control rather than a ledger source.
+              Unevaluable: section 19.6 also records that the MVP does not
+              unpack an archive at all, so nothing observes the metadata this
+              assertion is about. An uninspected archive reported as pass would
+              be a claim the scanner never checked, and reported as fail would
+              be a claim about a target that did nothing wrong.
+            until: >-
+              An accepted decision permits unpacking a downloaded skill archive
+              under the controls docs/THREAT_MODEL.md section 19.6 lists, and
+              names the limit values. That decision must also assign source_refs
+              for the limits it sets, which under ADR-0010 section 1 may be a
+              project-policy source provided the assertion is not normative.
           params: []
           excerpt_authorized: false
-          todo:
-            - "source_refs unassigned; see the ruleset todo"
-            - "params unassigned; see the ruleset todo"
       deltas:
         - >-
           A legacy-path presence pass is compatibility only.
@@ -936,44 +974,45 @@ rules:
           text: >-
             Support and interpret the RFC 9727 well-known resource and
             api-catalog link relation as specified.
-          source_refs: []
+          source_refs:
+            - source: "rfc9727"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "api-catalog.linkset"
           strength: "normative"
           text: >-
             Validate application/linkset+json syntax, anchors, link context,
             targets, relation types, and attributes under RFC 9264.
-          source_refs: []
+          source_refs:
+            - source: "rfc9264"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "api-catalog.relations"
           strength: "normative"
           text: >-
             Require the API links and relation semantics mandated by RFC 9727
             rather than accepting an empty or unrelated linkset.
-          source_refs: []
+          source_refs:
+            - source: "rfc9727"
+              section: "4.1"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
         - id: "api-catalog.profile"
           strength: "recommended"
           text: >-
             Advertise and validate the RFC 9727 profile URI where recommended by
             the specification.
-          source_refs: []
+          source_refs:
+            - source: "rfc9727"
           params: []
           excerpt_authorized: false
           todo:
-            - "source_refs unassigned; see the ruleset todo"
             - "params unassigned; see the ruleset todo"
       deltas:
         - >-

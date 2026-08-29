@@ -19,6 +19,7 @@ A decision is amended only by a new ADR. Superseding one does not edit it.
 | [0007](0007-report-self-containment.md) | M1 | The canonical report gains a cited-sources array, a top-level `sourceLedgerVersion`, and, in `compat` mode only, an `externalSnapshot` identifying the dated inventory. `registryVersion` is removed because ADR-0008 leaves no artifact carrying `registry_version`. Remediation text lives in a separate `specs/remediation.v0.yaml` keyed by finding code, with a build gate on completeness. |
 | [0008](0008-registry-extensibility.md) | M1 | Three authorities: `specs/checks.v0.yaml` frozen at 22 entries as the external compatibility snapshot, an independent versioned source ledger, and the executable native ruleset that is the single machine-readable home for per-rule implementation status and rule version. The snapshot's per-check `rule_version` is snapshot metadata, so the equality invariant is removed; retiring a published requirement needs a `retired_requirements` entry naming an ADR. Adds the missing `ai-rules.effective-access` and `content-signals.conflicting-declaration` assertions to the ruleset, not to the snapshot. |
 | [0009](0009-content-signals-source-pinning.md) | M1 | No Content Signals grammar is invented, and no compatibility observation decides a specification verdict. The three-token set stays in `compat` mode. RFC 9309 section 2.2.4 leaves extension records implementation-defined and addresses its one `MUST` to the crawler, so `content-signals.syntax` is retired outright and the rule produces no `spec: fail` at all. `sig-003` becomes an advisory `spec: warning` with `compat: fail`. |
+| [0010](0010-project-policy-and-deferred-assertions.md) | M1 | The project may be a source of its own policy, provided the ledger labels it: a new `project-policy` kind and `adopted-policy` status, located by repository `document` rather than an invented URL, forbidden to a `normative` assertion, and never mixed with an external source in one assertion's citations. The AgentReady Lab agent-useful relation policy 0.1.0 adopts `service-desc`, `describedby`, and `api-catalog` deliberately rather than inheriting them from the compatibility heuristic, and `links.agent-useful` cites it while staying advisory. `skills.archive-safety` is deferred rather than passed, because the MVP unpacks no archive: a `deferred` marker names the ADR, the reason, and the un-defer condition, and the assertion produces no finding and is counted as deferred, never as covered. |
 
 ## Open questions recorded but not resolved
 
@@ -58,6 +59,16 @@ A decision is amended only by a new ADR. Superseding one does not edit it.
 - Whether `network.maxConcurrency` is removed from the configuration schema or
   reactivated at `ci-public`, having been pinned to `1` for M1 (ADR-0005
   section 1).
+- Whether `markdown.fidelity` is a specification assertion or project policy
+  (ADR-0010 section 6). It is cited to `rfc9110` today by analogy to
+  `markdown.negotiation` in the same rule, and no repository document ties
+  representation fidelity to any source. RFC 9110 defines no fidelity
+  criterion, does not say which content is critical, and does not define
+  "invented"; the rule's own caveat forbidding an LLM oracle is this project
+  deciding how the check behaves. Keeping `rfc9110` needs a section pointer
+  read out of the RFC and recorded; moving it to a `project-policy` source
+  needs the criterion written down. Nobody has done either, the assertion is
+  `advisory`, and the citation stands until a maintainer settles it.
 
 Two entries were removed on 2026-08-29 because the decisions that owned them
 changed. `content-signals.syntax`'s missing `fail`-path fixture is moot now that
@@ -97,6 +108,7 @@ numbers are the stale document's own.
 | `specs/checks.v0.yaml` | top level | `registry_version`, `ruleset_id`, `ruleset_version`, and `sources:` migrate out to the ledger and the ruleset | ADR-0008 section 2 |
 | `specs/rule.schema.json` | top level | Requires the four migrated fields; keeps its 22-entry caps. `specs/sources.schema.json` and `specs/ruleset.schema.json` do not exist, and the latter must carry per-assertion `source_refs`, parameter schemas, excerpt authorization, and `retired_requirements` | ADR-0008 sections 1 and 2, ADR-0002 section 6 |
 | `specs/README.md` | "Files", version axes | Describes two files, calls `checks.v0.yaml` "a source ledger", and lists four version axes on that one file | ADR-0008 section 1 |
+| `specs/README.md` | "Assertions", "Validation" | "assertion with no `source_refs` and no `todo` is a validation failure" omits the `deferred` alternative, and nothing records that a `project-policy` source is located by `document` rather than a URL | ADR-0010 sections 1 and 4 |
 | `.claude/rules/standards.md` | "Registry contract" | Requires `checks.v0.yaml` to retain top-level `ruleset_id`/`ruleset_version` and names the source-ledger axis `registry_version` | ADR-0008 sections 1 and 2 |
 
 Two of these were not on the review's list of six and are recorded here because

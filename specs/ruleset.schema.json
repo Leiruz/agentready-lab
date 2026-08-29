@@ -104,6 +104,28 @@
         }
       }
     },
+    "deferred": {
+      "description": "ADR-0010 section 4. This assertion is declared and is not evaluated. It is excluded from the requirement that every applicable assertion carries an outcome, it produces no finding of any status, `rules explain` reports it as deferred with this reason, and a coverage gate counts it as deferred rather than covered. Deferral is not retirement: the assertion stays in `requirements`, keeps its id, and returns when `until` is met. A deferred assertion carries no source_refs, because it makes no claim while it is deferred.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adr", "reason", "until"],
+      "properties": {
+        "adr": {
+          "description": "The accepted decision that deferred it. A deferral with no adr is the silent pass this marker exists to prevent.",
+          "type": "string",
+          "pattern": "^ADR-[0-9]{4}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "until": {
+          "description": "The condition that un-defers it, stated as an event a maintainer can recognize rather than a date.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "assertion": {
       "type": "object",
       "additionalProperties": false,
@@ -115,7 +137,23 @@
         "params",
         "excerpt_authorized"
       ],
+      "allOf": [
+        {
+          "description": "ADR-0010 section 4. A deferred assertion is not evaluated, so it may not carry the citations a finding would use. Permitting both would let a deferral read as a claim resting on a source.",
+          "if": { "required": ["deferred"] },
+          "then": {
+            "properties": {
+              "source_refs": { "maxItems": 0 },
+              "params": { "maxItems": 0 },
+              "excerpt_authorized": { "const": false }
+            }
+          }
+        }
+      ],
       "properties": {
+        "deferred": {
+          "$ref": "#/$defs/deferred"
+        },
         "id": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9._-]*$"
@@ -128,7 +166,7 @@
           "minLength": 1
         },
         "source_refs": {
-          "description": "The only sources a finding for this assertion may cite. Empty is permitted only with a todo saying why (ADR-0002 section 6 requires the citations; no accepted decision assigns them yet).",
+          "description": "The only sources a finding for this assertion may cite. Empty is permitted in exactly two states: with a todo saying why (ADR-0002 section 6 requires the citations; no accepted decision assigns them yet), or with a `deferred` marker, because a deferred assertion is never evaluated and so cites nothing (ADR-0010 section 4).",
           "type": "array",
           "uniqueItems": true,
           "items": {
