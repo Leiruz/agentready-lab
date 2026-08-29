@@ -104,6 +104,10 @@ importers:
       '@agentready-lab/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@agentready-lab/testkit':
+        specifier: workspace:*
+        version: link:../testkit
 
   packages/testkit:
     dependencies:

@@ -20,5 +20,8 @@
   },
   "dependencies": {
     "@agentready-lab/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentready-lab/testkit": "workspace:*"
   }
 }
