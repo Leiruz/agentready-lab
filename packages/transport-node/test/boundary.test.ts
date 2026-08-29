@@ -9,6 +9,12 @@ import { buildRequestHeaders, checkResponseFraming } from "../src/index.js";
 import type { CanonicalTarget } from "../src/index.js";
 import { applyUrlPolicy } from "../src/index.js";
 
+// Each case here runs the TypeScript compiler over the package, which is
+// legitimately slow rather than hung: about 1s locally and past vitest's 5s
+// default on a cold CI runner. The timeout is raised for the whole block so a
+// slow machine reports a real result instead of a spurious failure.
+const COMPILE_PROBE_TIMEOUT_MS = 30_000;
+
 /**
  * The two invariants that are properties of the source rather than of a run.
  *
@@ -197,58 +203,62 @@ describe("response framing checks, independent of what Node also catches", () =>
   });
 });
 
-describe("the request header allowlist", () => {
-  function target(): CanonicalTarget {
-    const result = applyUrlPolicy("http://127.0.0.1:8080/x");
-    if (result.kind !== "url") throw new Error("unreachable");
-    return result.target;
-  }
+describe(
+  "the request header allowlist",
+  { timeout: COMPILE_PROBE_TIMEOUT_MS },
+  () => {
+    function target(): CanonicalTarget {
+      const result = applyUrlPolicy("http://127.0.0.1:8080/x");
+      if (result.kind !== "url") throw new Error("unreachable");
+      return result.target;
+    }
 
-  it("emits four fixed fields plus an allowlisted Accept", () => {
-    expect(
-      buildRequestHeaders(
+    it("emits four fixed fields plus an allowlisted Accept", () => {
+      expect(
+        buildRequestHeaders(
+          target(),
+          new Map([["accept", ["text/html"]]]),
+          "UA/1",
+        ),
+      ).toStrictEqual([
+        ["host", "127.0.0.1:8080"],
+        ["user-agent", "UA/1"],
+        ["accept-encoding", "identity"],
+        ["connection", "close"],
+        ["accept", "text/html"],
+      ]);
+    });
+
+    it("drops every header outside the allowlist", () => {
+      const headers = buildRequestHeaders(
         target(),
-        new Map([["accept", ["text/html"]]]),
+        new Map([
+          ["authorization", ["Bearer x"]],
+          ["cookie", ["a=b"]],
+          ["proxy-authorization", ["Basic x"]],
+          ["x-forwarded-for", ["10.0.0.1"]],
+        ]),
         "UA/1",
-      ),
-    ).toStrictEqual([
-      ["host", "127.0.0.1:8080"],
-      ["user-agent", "UA/1"],
-      ["accept-encoding", "identity"],
-      ["connection", "close"],
-      ["accept", "text/html"],
-    ]);
-  });
+      );
+      expect(headers?.map(([name]) => name)).toStrictEqual([
+        "host",
+        "user-agent",
+        "accept-encoding",
+        "connection",
+      ]);
+    });
 
-  it("drops every header outside the allowlist", () => {
-    const headers = buildRequestHeaders(
-      target(),
-      new Map([
-        ["authorization", ["Bearer x"]],
-        ["cookie", ["a=b"]],
-        ["proxy-authorization", ["Basic x"]],
-        ["x-forwarded-for", ["10.0.0.1"]],
-      ]),
-      "UA/1",
-    );
-    expect(headers?.map(([name]) => name)).toStrictEqual([
-      "host",
-      "user-agent",
-      "accept-encoding",
-      "connection",
-    ]);
-  });
-
-  it("fails closed on an unsafe allowlisted value rather than dropping it", () => {
-    expect(
-      buildRequestHeaders(
-        target(),
-        new Map([["accept", ["text/html\r\nX-Injected: 1"]]]),
-        "UA/1",
-      ),
-    ).toBeNull();
-  });
-});
+    it("fails closed on an unsafe allowlisted value rather than dropping it", () => {
+      expect(
+        buildRequestHeaders(
+          target(),
+          new Map([["accept", ["text/html\r\nX-Injected: 1"]]]),
+          "UA/1",
+        ),
+      ).toBeNull();
+    });
+  },
+);
 
 /**
  * The `ci-public` guarantee is a type, so the test for it has to be a compile.
@@ -299,23 +309,26 @@ function typeErrorsIn(probeSource: string): readonly string[] {
     );
 }
 
-describe("ci-public is unconstructible, not merely refused", () => {
-  it("compiles the supported path with no diagnostics", () => {
-    // The control. Without it every case below would pass just as well if the
-    // probe failed to compile for an unrelated reason.
-    expect(
-      typeErrorsIn(`
+describe(
+  "ci-public is unconstructible, not merely refused",
+  { timeout: COMPILE_PROBE_TIMEOUT_MS },
+  () => {
+    it("compiles the supported path with no diagnostics", () => {
+      // The control. Without it every case below would pass just as well if the
+      // probe failed to compile for an unrelated reason.
+      expect(
+        typeErrorsIn(`
         import { createNetworkPolicy, createNodeTransport } from "./index.js";
         const result = createNetworkPolicy("local-loopback", "http://127.0.0.1:8080/");
         if (result.kind === "policy") {
           createNodeTransport({ policy: result.policy });
         }
       `),
-    ).toStrictEqual([]);
-  });
+      ).toStrictEqual([]);
+    });
 
-  it("has no policy value that carries the ci-public id", () => {
-    const errors = typeErrorsIn(`
+    it("has no policy value that carries the ci-public id", () => {
+      const errors = typeErrorsIn(`
       import { createNodeTransport } from "./index.js";
       createNodeTransport({
         policy: {
@@ -339,18 +352,18 @@ describe("ci-public is unconstructible, not merely refused", () => {
         },
       });
     `);
-    // The literal type is what refuses it: there is no policy shape whose
-    // `id` can read "ci-public".
-    expect(errors.join(" ")).toContain(
-      `Type '"ci-public"' is not assignable to type '"local-loopback"'.`,
-    );
-  });
+      // The literal type is what refuses it: there is no policy shape whose
+      // `id` can read "ci-public".
+      expect(errors.join(" ")).toContain(
+        `Type '"ci-public"' is not assignable to type '"local-loopback"'.`,
+      );
+    });
 
-  it("has no way to forge a loopback policy for an unchecked destination", () => {
-    // The nominal half. `LocalLoopbackPolicy` holds `#private` fields, so an
-    // object literal cannot satisfy it however carefully it is shaped, and
-    // every instance therefore went through the loopback checks.
-    const errors = typeErrorsIn(`
+    it("has no way to forge a loopback policy for an unchecked destination", () => {
+      // The nominal half. `LocalLoopbackPolicy` holds `#private` fields, so an
+      // object literal cannot satisfy it however carefully it is shaped, and
+      // every instance therefore went through the loopback checks.
+      const errors = typeErrorsIn(`
       import { createNodeTransport } from "./index.js";
       createNodeTransport({
         policy: {
@@ -374,20 +387,21 @@ describe("ci-public is unconstructible, not merely refused", () => {
         },
       });
     `);
-    expect(errors.join(" ")).toContain(
-      "missing the following properties from type 'LocalLoopbackPolicy': #origin",
-    );
-  });
+      expect(errors.join(" ")).toContain(
+        "missing the following properties from type 'LocalLoopbackPolicy': #origin",
+      );
+    });
 
-  it("refuses a ci-public policy result even when one is asked for", () => {
-    const errors = typeErrorsIn(`
+    it("refuses a ci-public policy result even when one is asked for", () => {
+      const errors = typeErrorsIn(`
       import { createNetworkPolicy, createNodeTransport } from "./index.js";
       const result = createNetworkPolicy("ci-public", "https://example.com/");
       createNodeTransport({ policy: result.policy });
     `);
-    expect(errors.length).toBeGreaterThan(0);
-  });
-});
+      expect(errors.length).toBeGreaterThan(0);
+    });
+  },
+);
 
 /**
  * The connector is the one function that opens a socket, and it asks no
@@ -395,18 +409,21 @@ describe("ci-public is unconstructible, not merely refused", () => {
  * one in its place, would be a typed path around `createNodeTransport` for a
  * caller who wanted `169.254.169.254` and no `LocalLoopbackPolicy` at all.
  */
-describe("the entry point publishes no socket of its own", () => {
-  it("exports no value that opens a connection", async () => {
-    const entry: Record<string, unknown> = await import("../src/index.js");
-    expect(Object.keys(entry)).not.toContain("nodeExchange");
-  });
+describe(
+  "the entry point publishes no socket of its own",
+  { timeout: COMPILE_PROBE_TIMEOUT_MS },
+  () => {
+    it("exports no value that opens a connection", async () => {
+      const entry: Record<string, unknown> = await import("../src/index.js");
+      expect(Object.keys(entry)).not.toContain("nodeExchange");
+    });
 
-  it("names neither the connector nor the wire vocabulary", () => {
-    // One probe rather than five, because each one compiles the package.
-    // `ConnectionAttempt` and its relatives are listed too: they exist only to
-    // describe the connector, and they are the shape a caller would fill in to
-    // hand-write one.
-    const errors = typeErrorsIn(`
+    it("names neither the connector nor the wire vocabulary", () => {
+      // One probe rather than five, because each one compiles the package.
+      // `ConnectionAttempt` and its relatives are listed too: they exist only to
+      // describe the connector, and they are the shape a caller would fill in to
+      // hand-write one.
+      const errors = typeErrorsIn(`
       import { nodeExchange } from "./index.js";
       import type {
         ConnectionAttempt,
@@ -417,21 +434,21 @@ describe("the entry point publishes no socket of its own", () => {
       void nodeExchange;
       export type Probe = [ConnectionAttempt, ExchangeResult, OpenExchange, WireExchange];
     `).join(" ");
-    for (const name of [
-      "nodeExchange",
-      "ConnectionAttempt",
-      "ExchangeResult",
-      "OpenExchange",
-      "WireExchange",
-    ]) {
-      expect(errors).toContain(
-        `Module '"./index.js"' has no exported member '${name}'.`,
-      );
-    }
-  });
+      for (const name of [
+        "nodeExchange",
+        "ConnectionAttempt",
+        "ExchangeResult",
+        "OpenExchange",
+        "WireExchange",
+      ]) {
+        expect(errors).toContain(
+          `Module '"./index.js"' has no exported member '${name}'.`,
+        );
+      }
+    });
 
-  it("has no way to substitute one through the public factory", () => {
-    const errors = typeErrorsIn(`
+    it("has no way to substitute one through the public factory", () => {
+      const errors = typeErrorsIn(`
       import { createNetworkPolicy, createNodeTransport } from "./index.js";
       const result = createNetworkPolicy("local-loopback", "http://127.0.0.1:8080/");
       if (result.kind === "policy") {
@@ -444,6 +461,7 @@ describe("the entry point publishes no socket of its own", () => {
         });
       }
     `);
-    expect(errors.join(" ")).toContain("openExchange");
-  });
-});
+      expect(errors.join(" ")).toContain("openExchange");
+    });
+  },
+);
