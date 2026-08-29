@@ -526,6 +526,28 @@ function load(
 // `interop` is excluded on the same precedent, and it is the weaker of the two
 // exclusions: `interop.disposition` gates whether an interop action runs at
 // all. It is named here so a later decision can move it in deliberately.
+//
+// `deferred.reason` and `deferred.until` are excluded too, and unlike the
+// three above this one is decided here rather than inherited. What a deferral
+// decides is verdict-bearing and stays in: the marker itself, because a
+// deferred assertion produces no finding of any status, and `adr`, because a
+// deferral with no accepted decision behind it is the silent pass the marker
+// exists to prevent. `reason` and `until` are prose. The schema calls `until`
+// "the condition that un-defers it, stated as an event a maintainer can
+// recognize rather than a date", so it is a sentence a maintainer reads and
+// not a condition anything evaluates, which puts it with `reason` and with
+// `title`, `maturity` and `deltas` rather than with `adr`. Both were in the
+// projection until correcting one `reason` moved the ruleset digest while
+// `ruleset_version` stayed `0.4.0` and no verdict changed. That is exactly the
+// "a typo invalidates every pinned report" failure this projection exists to
+// prevent, so do not put them back. Nothing is lost by excluding them: the
+// full text stays in `specs/ruleset.standard.v0.yaml` and in
+// `PINNED_ASSERTIONS`, which is what `rules explain` prints.
+//
+// `retired_requirements[].reason` is the same kind of prose and is still in
+// the projection. It is named here, like `interop`, so that a later decision
+// moves it out deliberately rather than a reader assuming this sweep covered
+// every prose field.
 // ---------------------------------------------------------------------------
 
 interface ProjectedCheck {
@@ -606,6 +628,20 @@ function projectSnapshot(
   }
 
   return { captured_at: capturedAt, checks: projected };
+}
+
+/**
+ * Strip the prose out of a `deferred` marker, keeping the fact of the
+ * deferral and the decision that made it. See the exclusion note above; do not
+ * widen this back to the whole marker.
+ */
+function projectRequirement(raw: unknown): unknown {
+  const requirement = asRecord(raw);
+  const deferred =
+    requirement === null ? null : asRecord(requirement["deferred"]);
+  if (requirement === null || deferred === null) return raw;
+  const adr = asString(deferred["adr"]);
+  return { ...requirement, deferred: adr === null ? {} : { adr } };
 }
 
 interface ProjectedRule {
@@ -700,7 +736,10 @@ function projectRuleset(
       profiles,
       applicability,
       source_refs: sourceRefs,
-      spec: { claim_scope: claimScope, requirements },
+      spec: {
+        claim_scope: claimScope,
+        requirements: requirements.map(projectRequirement),
+      },
       compat_assertions: asArray(rule["compat_assertions"]) ?? [],
       retired_requirements: asArray(rule["retired_requirements"]) ?? [],
     });

@@ -35,11 +35,42 @@ section 2.2.4 and finding a `MAY`.
 
 **`skills.archive-safety`** reads "Inspect archive metadata under strict size,
 file-count, path, link, and compression-ratio limits without executing content."
-`agent-skills-discovery-v0.2.0` defines the `archive` entry type and a `sha256:`
-digest over an artifact's raw bytes, and states no limit of any kind. The limits
-come from `docs/THREAT_MODEL.md` section 19.6, which is this project's own
-control, and which also records that "Downloaded Agent Skills archives are not
-unpacked in the MVP."
+Of those five limits, `agent-skills-discovery-v0.2.0` supports two. Its Archive
+Safety section requires that an archive "MUST NOT contain path traversal
+sequences (`..`) or absolute paths" and that a client unpacking one "Reject
+archives containing symlinks or hard links that resolve outside the skill
+directory". What the draft states nowhere is a number: no byte size, no file
+count and no compression ratio, and the total unpacked size is left as a
+"reasonable limit" for the client to choose. Those three numeric limits come
+from `docs/THREAT_MODEL.md` section 19.6, which is this project's own control,
+and which also records that "Downloaded Agent Skills archives are not unpacked
+in the MVP."
+
+> [!NOTE]
+> **Corrected 2026-08-29. This paragraph misdescribed the source, and the
+> decision it supports is unchanged.** As accepted, it said the draft "states
+> no limit of any kind", which is false: the draft's Archive Safety section
+> states path and link rules, and only the numeric limits are absent. The
+> paragraph is corrected in place rather than rewritten, because a decision
+> that rested on a wrong reading of a source should show that it did.
+>
+> The deferral stands, and stands on the same two limbs. The uncited limb
+> narrows rather than collapses: three of this assertion's five limits are
+> still this project's own control and not the draft's, and section 3's second
+> prohibition below forbids an assertion citing a project-policy source and an
+> external source together, so the assertion as written still cannot be cited
+> to `agent-skills-discovery-v0.2.0` alone. The unevaluable limb is untouched and
+> is on its own sufficient: the MVP never unpacks an archive, so no observation
+> reaches the path, link or size metadata this assertion is about, and that
+> would remain true if the draft had stated all five limits in numbers.
+>
+> The root cause was not this decision. The `agent-skills-discovery-v0.2.0`
+> ledger entry had been written from the draft's Discovery Index section alone
+> and omitted its HTTP Considerations, Client Implementation, Archive Safety
+> and Security Considerations sections, and this paragraph read that entry
+> instead of the draft. The entry now records those sections. Section 4's
+> `reason` field carries the corrected text, which is what
+> `agentready-lab rules explain` renders.
 
 The two look alike because they share a symptom, and they are not alike. One
 assertion has an author and the ledger had no way to name it. The other has no

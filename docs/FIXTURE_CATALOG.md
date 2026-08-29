@@ -299,7 +299,7 @@ Primary rule: `agent.discovery.skills`
 | `skl-002` | Index omits the `$schema` required by the pinned ruleset. | `spec: fail` | Version identification |
 | `skl-003` | Entry digest uses an invalid algorithm/length/encoding. | `spec: fail` | Digest syntax validation |
 | `skl-004` | Only legacy `/.well-known/skills/index.json` exists and is otherwise valid. | `spec: fail` on `skills.path-schema`; `compat: pass` under the dated heuristic | Keep legacy compatibility out of v0.2 conformance |
-| `skl-005` | Entry URL is malformed or not an absolute HTTP(S) URL where the pinned draft requires one. | `spec: fail` with JSON Pointer | URL validation without fetching |
+| `skl-005` | Entry URL is not a valid RFC 3986 URI-reference. | `spec: fail` with JSON Pointer | URL validation without fetching |
 | `skl-006` | v0.2 discovery endpoint is absent. | `spec: not-applicable`, `compat: fail` for an agent-service profile that requires discovery | Profile applicability |
 | `skl-007` | Static metadata is valid, but the fixed artifact bytes do not match the declared digest. | `spec: pass` in static mode; `interop: fail` after a bounded same-origin fetch | Separate shape validation from opt-in dereference |
 
