@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 
@@ -194,6 +195,112 @@ describe("type environment", () => {
       expect(offenders).toStrictEqual([]);
     },
   );
+});
+
+/**
+ * ADR-0002's implementation constraints: the rule package pins
+ * `lib: ["ES2023"], types: []`, and a compile test asserts that
+ * `AbortSignal`, `URL`, `fetch` and `process` are unresolvable there.
+ *
+ * The value is the diagnostic code TypeScript actually reports. Three are
+ * TS2304. `process` is TS2591, the "install @types/node" wording of the same
+ * cannot-find-name failure, which TypeScript prefers for a known Node global
+ * once a `types` field is present. Pinning each code keeps a change in which
+ * error is reported visible rather than silent.
+ */
+const UNRESOLVABLE_IN_RULES: Readonly<Record<string, number>> = {
+  AbortSignal: 2304,
+  URL: 2304,
+  fetch: 2304,
+  process: 2591,
+};
+
+interface ProbeDiagnostic {
+  readonly code: number;
+  readonly message: string;
+}
+
+/**
+ * Type-checks `export const probe: unknown = <name>;` as a source file of
+ * `packageDir`, under that package's own compiler options and its own ambient
+ * declaration files, both read from its `tsconfig.json` rather than restated
+ * here. Re-adding `types/runtime-neutral-globals.d.ts` to the rule package
+ * therefore changes what the probe compiles against.
+ *
+ * Only the declaration files the config contributes are program roots: a
+ * global name resolves or does not without reference to the package's own
+ * sources, and compiling those would make this fail for unrelated reasons.
+ * The probe file exists in memory only and is never written to the package.
+ */
+function probeGlobal(
+  packageDir: string,
+  name: string,
+): readonly ProbeDiagnostic[] {
+  const configPath = path.join(repoRoot, packageDir, "tsconfig.json");
+  const configFile = ts.readConfigFile(
+    configPath,
+    // `.bind` because a bare `ts.sys.readFile` is an unbound method.
+    ts.sys.readFile.bind(ts.sys),
+  );
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    path.dirname(configPath),
+  );
+
+  const probePath = path.join(repoRoot, packageDir, "src", "globals.probe.ts");
+  const probeText = `export const probe: unknown = ${name};\n`;
+  const isProbe = (fileName: string): boolean =>
+    path.resolve(fileName) === probePath;
+
+  const host = ts.createCompilerHost(parsed.options, true);
+  const readSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersion, onError, createNew) =>
+    isProbe(fileName)
+      ? ts.createSourceFile(fileName, probeText, languageVersion, true)
+      : readSourceFile(fileName, languageVersion, onError, createNew);
+
+  const program = ts.createProgram({
+    rootNames: [
+      ...parsed.fileNames.filter((fileName) => fileName.endsWith(".d.ts")),
+      probePath,
+    ],
+    options: parsed.options,
+    host,
+  });
+
+  return program
+    .getSemanticDiagnostics()
+    .filter(({ file }) => file !== undefined && isProbe(file.fileName))
+    .map((diagnostic) => ({
+      code: diagnostic.code,
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, " "),
+    }));
+}
+
+describe("rule package globals", () => {
+  // The type environment block above proves the tsconfig settings; this one
+  // proves what they do. `packages/core` keeps
+  // `types/runtime-neutral-globals.d.ts` and `packages/rules-standard` does
+  // not, which is the entire difference between the two packages below.
+
+  it.each(Object.entries(UNRESOLVABLE_IN_RULES))(
+    "%s cannot be named in packages/rules-standard",
+    (name, code) => {
+      const diagnostics = probeGlobal("packages/rules-standard", name);
+
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]?.code).toBe(code);
+      expect(diagnostics[0]?.message).toContain(`Cannot find name '${name}'.`);
+    },
+  );
+
+  it("still resolves URL in packages/core", () => {
+    // Without this control the four cases above would pass just as well if
+    // the probe compiled nothing at all. `URL` is a pure parser with no I/O
+    // that core needs for `context.resolve()`; rules never construct one.
+    expect(probeGlobal("packages/core", "URL")).toStrictEqual([]);
+  });
 });
 
 describe("supply-chain settings", () => {

@@ -28,23 +28,50 @@ memory are not normative evidence.
 
 ## Registry contract
 
-Use `specs/checks.v0.yaml` and its schema as the machine-readable source of
-truth. A check entry must retain the fields required by that schema, including:
+The machine-readable source of truth is three files, not one, and each answers
+exactly one question (ADR-0008):
 
-- stable native `rule_id`, external compatibility `id`, and assertion
-  identifiers;
-- explicit `rule_version`, top-level `ruleset_id`/`ruleset_version`, and the
-  independent source-ledger `registry_version`;
+- `specs/checks.v0.yaml` records what IsItAgentReady published on
+  `snapshot.captured_at`. It is frozen at 22 entries and is never read at scan
+  time. Nothing may be added to it.
+- `specs/sources.v0.yaml` is the independent source ledger. Every `source_refs`
+  identifier in either other file resolves against it and against nothing else.
+  Its axis is `source_ledger_version`; there is no `registry_version` any more,
+  in any file or in a report.
+- `specs/ruleset.standard.v0.yaml` is the executable native ruleset and the only
+  authority for what this project asserts.
+
+Each file must retain the fields its schema requires, including:
+
+- stable native `rule_id` and assertion identifiers, in the ruleset; the
+  external compatibility `id` only in the snapshot, where a native rule with no
+  external counterpart simply has none;
+- the ruleset's per-rule `rule_version` and top-level
+  `ruleset_id`/`ruleset_version`, and the ledger's independent
+  `source_ledger_version`. The snapshot's per-check `rule_version` is frozen
+  external metadata: never the native rule version, never in a report, and free
+  to lag the ruleset by any distance;
+- per-rule `implementation_status` in the ruleset, which is the single
+  machine-readable authority for it. `PROJECT_STATUS.md`'s per-rule table is
+  generated from that field and checked in CI;
 - exact `spec`, `compat`, or `interop` mode applicability;
 - source maturity and requirement classification;
+- per assertion, the `source_refs` a finding may cite, the parameter schema its
+  message template may reference, and whether a bounded excerpt is authorized.
+  A rule chooses none of these;
 - exact version, dated draft, release, RFC, or immutable commit;
 - canonical source URL and relevant section or schema pointer;
 - applicability, discovery, assertion, and expected-outcome semantics;
 - source verification or compatibility-observation date.
 
-Check `maturity` is source maturity, not implementation status. Check `runtime`
-is the required observation capability (`http`, `dns`, or `browser`), not
-permission for rule code to perform direct I/O.
+A requirement the snapshot published may be retired, and may not be dropped. A
+`retired_requirements` entry naming the accepted ADR that retired it and a
+reason is what makes the difference; a retirement with no `adr` fails
+validation.
+
+`maturity` is source maturity, not implementation status. `runtime` is the
+required observation capability (`http`, `dns`, or `browser`), not permission
+for rule code to perform direct I/O.
 
 An undated mutable URL may aid discovery but is insufficient provenance by
 itself. Do not copy entire external specifications into the repository unless

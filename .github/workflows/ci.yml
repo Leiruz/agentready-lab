@@ -97,6 +97,14 @@ jobs:
       - name: 6. Local integration tests
         run: pnpm run test:integration
 
+      # Both gates below exist as scripts and as vitest mirrors. CI runs the
+      # seven TEST_STRATEGY steps individually and never invokes `pnpm check`,
+      # so a script-only gate would be one CI never executes.
+      - name: 6b. Specification registry and generated status table
+        run: |
+          pnpm run specs:validate
+          pnpm run status:check
+
       - name: 7. Build and package-content inspection
         # docs/THREAT_MODEL.md section 22: "Inspect `npm pack` contents and
         # exclude fixtures, secrets, and unnecessary development files."

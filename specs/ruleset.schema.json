@@ -1,0 +1,392 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentready-lab:schema:native-ruleset:v0",
+  "title": "AgentReady Lab native ruleset v0",
+  "description": "The executable ruleset: what this project asserts, at which rule versions, resting on which ledger sources, with which per-assertion parameter schemas. ADR-0008 section 1. It has no compat pass heuristic, no ordinal, and no camelCase external id: a native rule with no external counterpart simply has no external identity.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ruleset_id",
+    "ruleset_version",
+    "source_ledger_version",
+    "rules"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0"
+    },
+    "ruleset_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ruleset_version": {
+      "description": "Moves whenever the executable interpretation changes. Unrelated to the snapshot's per-check rule_version, which is frozen metadata.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "source_ledger_version": {
+      "description": "The specs/sources.v0.yaml version these citations were resolved against.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "todo": {
+      "$ref": "#/$defs/todo"
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "todo": {
+      "description": "Values an accepted decision requires but does not supply. Never a placeholder for a value that was simply not looked up.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source_ref": {
+      "description": "One ledger citation. The section pointer is what .claude/rules/standards.md requires beside the URL.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "section": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "param": {
+      "description": "One bounded typed template parameter (ADR-0002 section 6). Kinds and their grammars are that decision's M1 set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "required"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "kind": {
+          "enum": [
+            "count",
+            "http-status",
+            "token",
+            "header-name",
+            "media-type",
+            "origin-path",
+            "json-pointer",
+            "excerpt"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "allowed_values": {
+          "description": "Closed value set. Absent means the kind's grammar is the only constraint.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "strength",
+        "text",
+        "source_refs",
+        "params",
+        "excerpt_authorized"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "strength": {
+          "enum": ["normative", "recommended", "advisory"]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "description": "The only sources a finding for this assertion may cite. Empty is permitted only with a todo saying why (ADR-0002 section 6 requires the citations; no accepted decision assigns them yet).",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source_ref"
+          }
+        },
+        "params": {
+          "description": "Every parameter this assertion's templates may reference. Empty is the fail-closed default: an outcome carrying an undeclared parameter is a contract violation.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/param"
+          }
+        },
+        "excerpt_authorized": {
+          "description": "True only where this ruleset explicitly authorizes a bounded target-text excerpt in a finding.",
+          "type": "boolean"
+        },
+        "todo": {
+          "$ref": "#/$defs/todo"
+        }
+      }
+    },
+    "compat_assertion": {
+      "description": "A compat-mode assertion. Its class is always `compatibility` and it cites the dated snapshot, never the normative source (ADR-0002 section 9).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "source_refs", "params", "excerpt_authorized"],
+      "properties": {
+        "id": {
+          "pattern": "^compat:[a-z][a-zA-Z0-9]*\\.[a-z][a-z0-9-]*@\\d{4}-\\d{2}-\\d{2}$",
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source_ref"
+          }
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/param"
+          }
+        },
+        "excerpt_authorized": {
+          "type": "boolean"
+        },
+        "todo": {
+          "$ref": "#/$defs/todo"
+        }
+      }
+    },
+    "retired_requirement": {
+      "description": "A requirement the snapshot published that this ruleset no longer declares. ADR-0008 section 2: a retirement with no adr is a validation failure.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "adr", "reason"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "adr": {
+          "type": "string",
+          "pattern": "^ADR-[0-9]{4}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "rule_version",
+        "title",
+        "category",
+        "maturity",
+        "implementation_status",
+        "profiles",
+        "runtime",
+        "applicability",
+        "source_refs",
+        "spec",
+        "interop"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9-]*)+$"
+        },
+        "rule_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "enum": [
+            "discoverability",
+            "content-accessibility",
+            "bot-access-control",
+            "discovery",
+            "commerce"
+          ]
+        },
+        "maturity": {
+          "description": "Maturity of the pinned source set, projected to RuleMetadata.sourceMaturity. Never implementation status.",
+          "enum": [
+            "stable",
+            "mixed",
+            "draft",
+            "experimental",
+            "convention",
+            "beta"
+          ]
+        },
+        "implementation_status": {
+          "description": "The single machine-readable authority for per-rule status (ADR-0008 section 3). PROJECT_STATUS.md's table is generated from it.",
+          "enum": [
+            "planned",
+            "experimental",
+            "supported",
+            "deprecated",
+            "removed"
+          ]
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["content", "api", "agent-service", "commerce", "full"]
+          }
+        },
+        "runtime": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["http", "dns", "browser"]
+          }
+        },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "when"],
+          "properties": {
+            "default": {
+              "description": "The native names from ADR-0004 section 2, not the snapshot's published strings.",
+              "enum": [
+                "applicable",
+                "informational",
+                "optional",
+                "commerce-endpoint-required"
+              ]
+            },
+            "when": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$"
+          }
+        },
+        "spec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claim_scope", "requirements", "deltas"],
+          "properties": {
+            "claim_scope": {
+              "enum": [
+                "normative-conformance",
+                "profile-conformance",
+                "syntax-validation",
+                "detection-only",
+                "no-current-conformance-claim"
+              ]
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/assertion"
+              }
+            },
+            "deltas": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "compat_assertions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/compat_assertion"
+          }
+        },
+        "retired_requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/retired_requirement"
+          }
+        },
+        "interop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["disposition", "safe_actions", "caveats"],
+          "properties": {
+            "disposition": {
+              "enum": [
+                "safe-read-only",
+                "browser-required",
+                "known-endpoint-required",
+                "not-in-mvp"
+              ]
+            },
+            "safe_actions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "caveats": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "todo": {
+          "$ref": "#/$defs/todo"
+        }
+      }
+    }
+  }
+}

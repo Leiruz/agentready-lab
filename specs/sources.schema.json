@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:agentready-lab:schema:source-ledger:v0",
+  "title": "AgentReady Lab source ledger v0",
+  "description": "The independent, versioned record of every pinned source. Every source_refs identifier in specs/checks.v0.yaml and specs/ruleset.standard.v0.yaml resolves against this file and against nothing else (ADR-0008 section 1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_ledger_version",
+    "ledger_date",
+    "sources"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0"
+    },
+    "source_ledger_version": {
+      "description": "Moves when a source's version, status, verification date, or recorded state changes, independently of the snapshot and of the ruleset.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "ledger_date": {
+      "description": "The ledger's own declared clock: the date this revision of the ledger was current. No verified_at may be after it, and it may not be earlier than the newest verified_at. It is the ceiling for ledger dates in place of snapshot.captured_at, because ADR-0008 section 1 versions the ledger independently of the snapshot.",
+      "type": "string",
+      "format": "date"
+    },
+    "todo": {
+      "$ref": "#/$defs/todo"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    }
+  },
+  "$defs": {
+    "todo": {
+      "description": "Values an accepted decision requires but does not supply. Never a placeholder for a value that was simply not looked up.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "url", "kind", "status", "verified_at"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "kind": {
+          "enum": [
+            "compatibility-contract",
+            "ietf-rfc",
+            "ietf-draft",
+            "openid-specification",
+            "industry-protocol",
+            "standards-organization",
+            "w3c-community-report",
+            "ecosystem-specification",
+            "vendor-convention",
+            "open-source-profile",
+            "open-proposal"
+          ]
+        },
+        "status": {
+          "enum": [
+            "compatibility-snapshot",
+            "internet-standard",
+            "proposed-standard",
+            "informational-rfc",
+            "final",
+            "active-draft",
+            "expired-draft",
+            "open-pr",
+            "proposal",
+            "beta",
+            "community-report",
+            "convention",
+            "living-specification"
+          ]
+        },
+        "version": {
+          "description": "Exact version, dated draft, release, RFC number, or immutable commit. An undated mutable URL is not provenance on its own.",
+          "type": "string",
+          "minLength": 1
+        },
+        "verified_at": {
+          "type": "string",
+          "format": "date"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "todo": {
+          "$ref": "#/$defs/todo"
+        }
+      }
+    }
+  }
+}

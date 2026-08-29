@@ -1,0 +1,1637 @@
+# AgentReady Lab native executable ruleset (ADR-0008 section 1).
+#
+# The single machine-readable authority for what this project asserts:
+# per-rule implementation status, per-rule rule_version, per-assertion
+# source_refs and parameter schemas, excerpt authorization, and retired
+# requirements. specs/checks.v0.yaml is a frozen record of what an
+# external tool published on a date and is never read at scan time.
+#
+# Created at ruleset_version 0.2.0 on 2026-08-29 (ADR-0008 section 5).
+# Every source_refs identifier resolves against specs/sources.v0.yaml.
+
+schema_version: "0"
+ruleset_id: "standard"
+ruleset_version: "0.3.0"
+source_ledger_version: "0.3.0"
+
+todo:
+  - >-
+    compat_assertions: no accepted decision names a single compat-mode assertion
+    id. ADR-0002 section 9 fixes only the format,
+    compat:<external-id>.<assertion>@<snapshot-date>. Every rule below therefore
+    declares none, which leaves the compat verdicts that ADR-0009 section 6
+    expects for sig-003 and sig-006 with no assertion id to report against.
+  - >-
+    message templates: ADR-0002 section 6 requires a template table keyed by
+    assertion id and outcome kind, published beside this file and versioned with
+    it. It does not exist, which is why every assertion below declares an empty
+    parameter schema and authorizes no excerpt. That is the fail-closed state:
+    validateOutcomeParams rejects every parameter an assertion does not declare.
+  - >-
+    per-assertion source_refs: no accepted decision assigns them. ADR-0002
+    section 6 requires each assertion to carry its authoritative sources and
+    forbids a rule choosing its own; deriving them from the requirement prose
+    would be that same choice made by an implementer instead of by a decision.
+    Every assertion marked "source_refs unassigned" below is waiting on that
+    decision. The exception is web.policy.content-signals, where ADR-0009
+    section 7 requires content-signals-draft-00 in every finding message of the
+    rule.
+
+rules:
+  - rule_id: "web.discovery.robots"
+    rule_version: "0.1.0"
+    title: "robots.txt"
+    category: "discoverability"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "applicable"
+      when: "An HTTP or HTTPS origin is being evaluated for crawler discovery."
+    source_refs: ["isit-2026-08-28", "rfc9309"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "robots.location"
+          strength: "normative"
+          text: >-
+            Request the lowercase /robots.txt path at the origin root and parse
+            a successful representation according to RFC 9309.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "robots.syntax"
+          strength: "normative"
+          text: >-
+            Decode the file as UTF-8, recognize user-agent groups, and apply
+            matching and precedence rules from RFC 9309.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "robots.not-authz"
+          strength: "advisory"
+          text: >-
+            Report that REP preferences are not access authorization and must
+            not protect secrets.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Spec mode implements RFC response-class and redirect semantics instead
+          of treating only status 200 as meaningful.
+        - >-
+          Unknown extension records such as Sitemap and Content-Signal do not
+          make an otherwise valid REP document invalid.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Fetch /robots.txt with bounded redirects and body size, then expose
+          the normalized groups and selected group for the configured agent
+          token.
+      caveats:
+        - >-
+          Never interpret a permissive robots policy as authorization to fetch
+          another resource.
+
+  - rule_id: "web.discovery.sitemap"
+    rule_version: "0.1.0"
+    title: "Sitemap"
+    category: "discoverability"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "applicable"
+      when: "The target publishes crawlable resources for URL discovery."
+    source_refs: ["isit-2026-08-28", "sitemaps-protocol", "rfc9309"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "sitemap.xml"
+          strength: "normative"
+          text: >-
+            Validate the sitemap or sitemap-index root, namespace, URL scope,
+            encoding, and protocol limits against the Sitemaps protocol.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "sitemap.directive"
+          strength: "normative"
+          text: >-
+            When discovery starts from a Sitemap record in robots.txt, parse its
+            absolute URL and fetch that document before claiming sitemap
+            conformance.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "sitemap.canonical"
+          strength: "recommended"
+          text: >-
+            Use canonical, absolute URLs and keep last-modified data truthful
+            when it is supplied.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A Sitemap directive alone is discovery evidence in compat mode but is
+          insufficient for spec conformance.
+        - >-
+          Generic well-formed XML is insufficient; the protocol vocabulary and
+          limits must also validate.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Dereference one discovered sitemap under a bounded request and
+          decompression budget and validate its declared URLs.
+      caveats:
+        - >-
+          Do not recursively crawl sitemap indexes without an explicit depth and
+          resource budget.
+
+  - rule_id: "web.discovery.link"
+    rule_version: "0.1.0"
+    title: "Link headers"
+    category: "discoverability"
+    maturity: "mixed"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "applicable"
+      when: >-
+        The target can advertise machine-readable resources from an HTTP
+        response.
+    source_refs: ["isit-2026-08-28", "rfc8288", "rfc9727"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "links.parse"
+          strength: "normative"
+          text: >-
+            Parse every Link field using RFC 8288, including multiple field
+            lines, commas, quoted parameters, relative targets, and anchor
+            context.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "links.relation"
+          strength: "normative"
+          text: >-
+            Interpret registered relation names and extension relation URIs
+            according to RFC 8288 rather than a substring search.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "links.agent-useful"
+          strength: "advisory"
+          text: >-
+            Classify selected discovery relations as agent-useful under a
+            separately versioned AgentReady Lab policy.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A syntactically valid Link can conform to RFC 8288 without matching
+          the compatibility allowlist.
+        - >-
+          A recognized relation whose target is invalid can pass a presence
+          heuristic but fail a relation-specific rule.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Resolve one selected same-origin discovery link and validate the
+          expected media type under a separate rule.
+      caveats:
+        - >-
+          Cross-origin targets require the same SSRF and redirect validation as
+          the original target.
+
+  - rule_id: "dns.discovery.dns-aid"
+    rule_version: "0.1.0"
+    title: "DNS for AI Discovery (DNS-AID)"
+    category: "discoverability"
+    maturity: "draft"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["dns"]
+    applicability:
+      default: "optional"
+      when: "The user opts into draft DNS-AID evaluation for a public DNS name."
+    source_refs: ["isit-2026-08-28", "dns-aid-02", "rfc9460"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "dnsaid.version"
+          strength: "normative"
+          text: >-
+            Evaluate the owner names, service modes, parameters, and discovery
+            procedure from pinned DNS-AID draft-02.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "dnsaid.svcb"
+          strength: "normative"
+          text: >-
+            Parse SVCB and HTTPS records according to RFC 9460 and reject
+            AliasMode when the selected DNS-AID profile requires ServiceMode.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "dnsaid.dnssec"
+          strength: "normative"
+          text: >-
+            Require authenticated DNSSEC validation evidence rather than
+            trusting an unverified AD bit from an unspecified resolver.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          DNS-AID is an individual Internet-Draft, not an RFC and not IETF
+          consensus.
+        - >-
+          A future draft may change labels, parameters, or required validation;
+          draft-02 results must remain pinned.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Query configured DNSSEC-validating resolvers for the pinned owner
+          names and compare normalized answers.
+      caveats:
+        - >-
+          Resolver disagreement is evidence, not an automatic protocol failure.
+
+  - rule_id: "web.content.markdown-negotiation"
+    rule_version: "0.1.0"
+    title: "Markdown negotiation"
+    category: "content-accessibility"
+    maturity: "convention"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "applicable"
+      when: "The submitted page has a meaningful Markdown representation."
+    source_refs:
+      - "isit-2026-08-28"
+      - "cloudflare-markdown-agents"
+      - "rfc7763"
+      - "rfc9110"
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "markdown.media-type"
+          strength: "normative"
+          text: >-
+            When this profile selects Markdown, return a valid text/markdown
+            Content-Type as registered by RFC 7763.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "markdown.negotiation"
+          strength: "normative"
+          text: >-
+            Respect HTTP content negotiation without changing the resource's
+            meaning or returning Markdown to an HTML-only request solely because
+            a test is present.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "markdown.vary"
+          strength: "recommended"
+          text: >-
+            Include Accept in Vary when caches could otherwise reuse one
+            representation for the other.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "markdown.fidelity"
+          strength: "advisory"
+          text: >-
+            Check that critical headings, links, code, and factual text remain
+            represented without invented content.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Vary: Accept and representation fidelity are valuable checks but are
+          not part of IsIt's published pass heuristic.
+        - >-
+          Do not call a text/markdown response standards conformance without
+          naming the selected profile and HTTP assertions.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Fetch the same URL with HTML and Markdown Accept values using distinct
+          cache keys, then compare media type, selected validators, and bounded
+          structural facts.
+      caveats:
+        - >-
+          Do not use an LLM as the pass/fail oracle for semantic fidelity.
+
+  - rule_id: "web.policy.ai-crawler"
+    rule_version: "0.2.0"
+    title: "AI bot rules"
+    category: "bot-access-control"
+    maturity: "mixed"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "applicable"
+      when: "The target uses REP to communicate crawler policy."
+    source_refs:
+      - "isit-2026-08-28"
+      - "rfc9309"
+      - "cloudflare-ai-crawl-control"
+      - "openai-crawlers"
+      - "google-crawlers"
+      - "anthropic-crawlers"
+    spec:
+      claim_scope: "detection-only"
+      requirements:
+        - id: "ai-rules.rep-parse"
+          strength: "normative"
+          text: >-
+            Parse group selection and allow/disallow precedence with RFC 9309
+            before reporting the effective policy for a named token.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ai-rules.token-source"
+          strength: "advisory"
+          text: >-
+            Version and cite the external crawler-token registry used for
+            classification.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ai-rules.effective-access"
+          strength: "recommended"
+          text: >-
+            Compute and record the effective RFC 9309 access decision for each
+            configured crawler token at the configured tested path, including
+            the default decision when no group matches, and report a disallowed
+            decision as a warning about agent reachability rather than as a
+            protocol failure.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          RFC 9309 does not define an AI-crawler class or require AI-specific
+          groups.
+        - >-
+          Spec mode reports the effective policy and cannot label mere group
+          presence as access allowed.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Calculate the effective rule for explicitly configured crawler tokens
+          and paths without fetching those paths.
+      caveats:
+        - >-
+          Do not test blocked paths merely to verify that a crawler would be
+          blocked.
+
+  - rule_id: "web.policy.content-signals"
+    rule_version: "0.2.0"
+    title: "Content Signals"
+    category: "bot-access-control"
+    maturity: "experimental"
+    implementation_status: "planned"
+    profiles: ["content", "api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: "The publisher chooses to declare Content Signals preferences."
+    source_refs:
+      - "isit-2026-08-28"
+      - "content-signals"
+      - "content-signals-draft-00"
+      - "rfc9309"
+    spec:
+      claim_scope: "detection-only"
+      requirements:
+        - id: "content-signals.coverage"
+          strength: "recommended"
+          text: >-
+            Report omitted signal dimensions rather than inferring an unstated
+            yes or no policy.
+          source_refs:
+            - source: "content-signals-draft-00"
+          params: []
+          excerpt_authorized: false
+          todo:
+            - >-
+              source_refs beyond content-signals-draft-00 unassigned; see the
+              ruleset todo
+            - "params unassigned; see the ruleset todo"
+        - id: "content-signals.effect"
+          strength: "advisory"
+          text: >-
+            Describe the result as a declared preference, not consent,
+            prohibition, or verified recipient behavior.
+          source_refs:
+            - source: "content-signals-draft-00"
+          params: []
+          excerpt_authorized: false
+          todo:
+            - >-
+              source_refs beyond content-signals-draft-00 unassigned; see the
+              ruleset todo
+            - "params unassigned; see the ruleset todo"
+        - id: "content-signals.conflicting-declaration"
+          strength: "advisory"
+          text: >-
+            When the same signal token is declared more than once with
+            conflicting values inside one REP group and the pinned source
+            defines no conflict resolution, report the conflict and the
+            unresolved state instead of selecting a winner.
+          source_refs:
+            - source: "content-signals-draft-00"
+          params: []
+          excerpt_authorized: false
+          todo:
+            - >-
+              source_refs beyond content-signals-draft-00 unassigned; see the
+              ruleset todo
+            - "params unassigned; see the ruleset todo"
+        - id: "content-signals.unrecognized-vocabulary"
+          strength: "advisory"
+          text: >-
+            When a syntactically valid Content-Signal directive declares no
+            token that the dated compatibility snapshot recognizes, or declares
+            an additional token beyond that set, report the declaration as
+            unrecognized by the project's pinned sources and record the tokens
+            verbatim as bounded sanitized evidence. This is not a violation of
+            any pinned specification.
+          source_refs:
+            - source: "content-signals-draft-00"
+          params:
+            - name: "recognized-token-count"
+              kind: "count"
+              required: true
+          excerpt_authorized: false
+          todo:
+            - >-
+              source_refs beyond content-signals-draft-00 unassigned; see the
+              ruleset todo
+            - >-
+              excerpt_authorized: ADR-0009 sections 4 and 5 require the declared
+              tokens to be recorded verbatim as bounded sanitized evidence,
+              which is ADR-0002 section 6's excerpt parameter; authorizing it
+              waits for the message-template decision
+      deltas:
+        - >-
+          The check can validate syntax and placement only; it cannot test legal
+          effect or crawler compliance.
+        - >-
+          Absence is not a violation of RFC 9309.
+    retired_requirements:
+      - id: "content-signals.syntax"
+        adr: "ADR-0009"
+        reason: >-
+          RFC 9309 section 2.2.4 defines no syntax for an extension record,
+          explicitly permits leniency, and addresses its one MUST to the crawler
+          rather than to the publisher. No pinned source supports a
+          publisher-side syntax failure, so the assertion is retired rather than
+          rewritten under another id.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Parse and report the effective declared values for selected REP
+          groups.
+      caveats:
+        - >-
+          No network interaction can prove that an unrelated crawler observes
+          the declaration.
+    todo:
+      - >-
+        spec.deltas: the first delta copied from the snapshot says this check
+        "can validate syntax and placement only", which ADR-0009 section 3
+        contradicts by retiring the only syntax assertion. Replacement prose is
+        not written by any accepted decision, so the copied text stands until
+        one writes it.
+
+  - rule_id: "web.identity.web-bot-auth"
+    rule_version: "0.1.0"
+    title: "Web Bot Auth"
+    category: "bot-access-control"
+    maturity: "draft"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "informational"
+      when: >-
+        The target sends authenticated bot requests and publishes verification
+        keys.
+    source_refs:
+      - "isit-2026-08-28"
+      - "webbotauth-wg"
+      - "webbotauth-protocol-02"
+      - "rfc9421"
+      - "cloudflare-webbotauth"
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "webbotauth.directory"
+          strength: "normative"
+          text: >-
+            Validate the directory representation, keys, identifiers, media
+            type, and cache behavior against pinned protocol draft-02.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "webbotauth.httpsig"
+          strength: "normative"
+          text: >-
+            When signature verification is selected, implement RFC 9421
+            covered-component, algorithm, time, and key-selection rules required
+            by the pinned profile.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Directory presence is a discovery detector, not end-to-end Web Bot
+          Auth conformance.
+        - >-
+          Draft-specific results must retain the draft number when a later IETF
+          document changes.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future controlled harness may verify a fixture-signed request
+          against a fixture key directory.
+      caveats:
+        - >-
+          Do not issue signed requests as a third-party identity or treat
+          arbitrary live signatures as authorization.
+
+  - rule_id: "agent.discovery.mcp-server-card"
+    rule_version: "0.1.0"
+    title: "MCP Server Card"
+    category: "discovery"
+    maturity: "experimental"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: >-
+        The target intentionally advertises an MCP server using the evolving
+        Server Card proposal.
+    source_refs: ["isit-2026-08-28", "mcp-sep-2127"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "mcp-card.pin"
+          strength: "normative"
+          text: >-
+            Pin an exact SEP-2127 commit and validate only the discovery path,
+            card schema, and media behavior defined by that snapshot.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "mcp-card.fields"
+          strength: "normative"
+          text: >-
+            Validate all fields required by the pinned card schema, not only a
+            name field.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "mcp-card.endpoint"
+          strength: "recommended"
+          text: >-
+            Resolve declared endpoints and authentication descriptions without
+            sending credentials or invoking tools.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          SEP-2127 is an open proposal whose path and schema have changed during
+          review; it is not MCP core conformance.
+        - >-
+          The three compatibility paths include community and legacy deployments
+          and must not be presented as equally normative.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future opt-in harness may perform MCP initialize against a declared
+          fixture endpoint and stop before listing or invoking tools.
+      caveats:
+        - >-
+          Static card validity does not prove transport, protocol-version,
+          authentication, or tool interoperability.
+
+  - rule_id: "agent.discovery.a2a-agent-card"
+    rule_version: "0.1.0"
+    title: "A2A Agent Card"
+    category: "discovery"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: "The target claims to expose an A2A v1.0 agent."
+    source_refs: ["isit-2026-08-28", "a2a-v1.0", "a2a-v1.0-definitions"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "a2a.card-required"
+          strength: "normative"
+          text: >-
+            Validate all required v1.0 AgentCard members, including name,
+            description, supportedInterfaces, version, capabilities, default
+            input and output modes, and skills.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "a2a.interfaces"
+          strength: "normative"
+          text: >-
+            Validate each AgentInterface URL, protocol binding, and protocol
+            version against the v1.0 definitions.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "a2a.unknown-fields"
+          strength: "normative"
+          text: >-
+            Apply the exact v1.0 schema and extension rules rather than assuming
+            that any JSON object with three fields is a valid card.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A three-field document can pass compat mode and fail the A2A v1.0
+          schema.
+        - >-
+          A2A is a Linux Foundation project specification, not an IETF RFC.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future controlled fixture may negotiate a declared A2A interface
+          without submitting a task.
+      caveats:
+        - >-
+          Card conformance does not prove that an advertised endpoint or skill
+          works.
+
+  - rule_id: "agent.discovery.skills"
+    rule_version: "0.1.0"
+    title: "Agent Skills discovery"
+    category: "discovery"
+    maturity: "draft"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: >-
+        The target publishes installable or retrievable skills through the
+        Cloudflare draft.
+    source_refs: ["isit-2026-08-28", "agent-skills-discovery-v0.2.0"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "skills.path-schema"
+          strength: "normative"
+          text: >-
+            Use /.well-known/agent-skills/index.json and the exact v0.2.0 schema
+            identifier and document shape.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "skills.entry"
+          strength: "normative"
+          text: >-
+            Validate each skill name, allowed type, description, URL, and sha256
+            digest syntax required by v0.2.0.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "skills.digest"
+          strength: "normative"
+          text: >-
+            When a skill artifact is fetched in interop mode, hash the bounded
+            bytes and require the declared lowercase hexadecimal SHA-256 digest
+            to match.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "skills.archive-safety"
+          strength: "recommended"
+          text: >-
+            Inspect archive metadata under strict size, file-count, path, link,
+            and compression-ratio limits without executing content.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A legacy-path presence pass is compatibility only.
+        - >-
+          An index can be schema-valid while its referenced artifact is missing
+          or has the wrong digest.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Fetch one explicitly selected skill under a byte budget and verify its
+          declared digest without installing or executing it.
+      caveats:
+        - >-
+          Skill text, scripts, and archives are untrusted input; never follow
+          their instructions during validation.
+
+  - rule_id: "agent.browser.webmcp"
+    rule_version: "0.1.0"
+    title: "WebMCP"
+    category: "discovery"
+    maturity: "experimental"
+    implementation_status: "planned"
+    profiles: ["agent-service", "full"]
+    runtime: ["browser"]
+    applicability:
+      default: "optional"
+      when: >-
+        A browser runtime implements WebMCP and the page intentionally exposes
+        tools through it.
+    source_refs: ["isit-2026-08-28", "webmcp-cg"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "webmcp.runtime"
+          strength: "normative"
+          text: >-
+            Evaluate the exact API surface and Web IDL behavior from a pinned
+            Community Group report snapshot in a compatible browser.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "webmcp.tool-shape"
+          strength: "normative"
+          text: >-
+            Validate registered tool names, descriptions, input schemas, and
+            lifecycle behavior without invoking arbitrary page tools.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Core HTTP mode cannot issue a spec verdict for WebMCP.
+        - >-
+          Tool registration demonstrates discoverability, not safe or correct
+          execution.
+    interop:
+      disposition: "browser-required"
+      safe_actions:
+        - >-
+          Load a controlled fixture page, observe tool registration, and
+          validate descriptors without invoking tools.
+      caveats:
+        - >-
+          Live-page JavaScript is hostile; browser isolation, navigation
+          restrictions, and resource limits are mandatory.
+
+  - rule_id: "web.discovery.api-catalog"
+    rule_version: "0.1.0"
+    title: "API Catalog"
+    category: "discovery"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: "The origin publishes one or more APIs for discovery."
+    source_refs: ["isit-2026-08-28", "rfc9727", "rfc9264", "rfc8288"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "api-catalog.discovery"
+          strength: "normative"
+          text: >-
+            Support and interpret the RFC 9727 well-known resource and
+            api-catalog link relation as specified.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "api-catalog.linkset"
+          strength: "normative"
+          text: >-
+            Validate application/linkset+json syntax, anchors, link context,
+            targets, relation types, and attributes under RFC 9264.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "api-catalog.relations"
+          strength: "normative"
+          text: >-
+            Require the API links and relation semantics mandated by RFC 9727
+            rather than accepting an empty or unrelated linkset.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "api-catalog.profile"
+          strength: "recommended"
+          text: >-
+            Advertise and validate the RFC 9727 profile URI where recommended by
+            the specification.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A JSON object with a linkset array can pass the detector while
+          containing no conformant API catalog entries.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Resolve one selected service description or documentation link and
+          validate only its declared media type and availability.
+      caveats:
+        - >-
+          Do not invoke an advertised API operation.
+
+  - rule_id: "auth.discovery.oauth-authorization-server"
+    rule_version: "0.1.0"
+    title: "OAuth or OpenID discovery"
+    category: "discovery"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: >-
+        The target uses OAuth authorization-server metadata or OpenID Provider
+        discovery.
+    source_refs: ["isit-2026-08-28", "rfc8414", "openid-discovery-1.0"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "oauth-metadata.location"
+          strength: "normative"
+          text: >-
+            Construct the correct well-known URL for the issuer, including
+            path-bearing issuers, under the selected RFC 8414 or OpenID profile.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "oauth-metadata.issuer"
+          strength: "normative"
+          text: >-
+            Require an HTTPS issuer with no query or fragment and exact
+            identifier equality where the selected specification requires it.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "oauth-metadata.fields"
+          strength: "normative"
+          text: >-
+            Apply each required or conditional metadata member based on the
+            selected protocol and advertised capabilities.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "oauth-metadata.urls"
+          strength: "normative"
+          text: >-
+            Validate endpoint URL syntax and security requirements without
+            contacting or authenticating to those endpoints.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A blanket required-field list can reject a legal deployment or accept
+          internally inconsistent metadata.
+        - >-
+          OpenID Provider discovery and RFC 8414 authorization-server metadata
+          are related but distinct conformance targets.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Fetch the selected metadata document and cross-check issuer identity
+          and internally referenced public discovery endpoints.
+      caveats:
+        - >-
+          Do not perform dynamic client registration, authorization, or token
+          requests.
+
+  - rule_id: "auth.discovery.oauth-protected-resource"
+    rule_version: "0.1.0"
+    title: "OAuth Protected Resource Metadata"
+    category: "discovery"
+    maturity: "stable"
+    implementation_status: "planned"
+    profiles: ["api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: >-
+        The target is an OAuth-protected resource that publishes RFC 9728
+        metadata.
+    source_refs: ["isit-2026-08-28", "rfc9728"]
+    spec:
+      claim_scope: "normative-conformance"
+      requirements:
+        - id: "prm.location"
+          strength: "normative"
+          text: >-
+            Construct the RFC 9728 well-known URI from the protected-resource
+            identifier, including its path when applicable.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "prm.response"
+          strength: "normative"
+          text: >-
+            Require a successful application/json response and validate the
+            metadata object under RFC 9728.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "prm.resource"
+          strength: "normative"
+          text: >-
+            Require resource and verify that it equals the protected-resource
+            identifier used to obtain the metadata.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "prm.authorization-servers"
+          strength: "advisory"
+          text: >-
+            Validate authorization_servers when present; do not require this
+            optional member for RFC conformance.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          An RFC 9728-conformant document without authorization_servers fails
+          the published compatibility heuristic.
+        - >-
+          Spec and compat fixtures must preserve this intentional disagreement.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Resolve the protected-resource metadata URL and, when declared,
+          cross-check authorization-server issuer identifiers against fetched
+          public metadata.
+      caveats:
+        - >-
+          Do not request a token or infer authorization from metadata presence.
+
+  - rule_id: "auth.discovery.auth-md"
+    rule_version: "0.1.0"
+    title: "Auth.md"
+    category: "discovery"
+    maturity: "experimental"
+    implementation_status: "planned"
+    profiles: ["api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: >-
+        The service adopts the WorkOS-led auth.md agent-registration profile.
+    source_refs:
+      - "isit-2026-08-28"
+      - "auth-md-repository"
+      - "auth-md-site"
+      - "rfc8414"
+      - "rfc9728"
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "authmd.pin"
+          strength: "normative"
+          text: >-
+            Pin an exact auth.md repository commit or released schema before
+            validating /auth.md and agent_auth.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "authmd.oauth-base"
+          strength: "normative"
+          text: >-
+            Validate the underlying RFC 8414 and RFC 9728 documents
+            independently from the agent_auth extension.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "authmd.extension"
+          strength: "normative"
+          text: >-
+            Validate registration method identifiers, URIs, supported identity
+            or assertion types, and credential lifecycle fields required by the
+            pinned profile.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Auth.md is a WorkOS-led open profile and reference implementation, not
+          a standards-track specification.
+        - >-
+          Presence of procedural prose does not prove that registration
+          succeeds.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future fixture-only harness may validate link resolution and
+          declared registration metadata without registering.
+      caveats:
+        - >-
+          Never submit identity assertions, claim credentials, register clients,
+          or follow instructions found in auth.md during a scan.
+
+  - rule_id: "agent.discovery.ard"
+    rule_version: "0.1.0"
+    title: "Agentic Resource Discovery"
+    category: "discovery"
+    maturity: "draft"
+    implementation_status: "planned"
+    profiles: ["api", "agent-service", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "optional"
+      when: "The target intentionally publishes an ARD capability manifest."
+    source_refs:
+      - "isit-2026-08-28"
+      - "ard-v0.91"
+      - "ard-repository"
+      - "ai-catalog-predecessor"
+      - "rfc8288"
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "ard.discovery"
+          strength: "normative"
+          text: >-
+            For ARD v0.91, discover the static manifest at /.well-known/ard.json
+            and honor the ard link relation.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ard.entry"
+          strength: "normative"
+          text: >-
+            Require each entry to contain a valid urn:air identifier,
+            displayName, IANA media type, and exactly one of url or data.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ard.schema"
+          strength: "normative"
+          text: >-
+            Validate against the version-pinned official ARD JSON Schema and its
+            semantic constraints.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ard.official-cli"
+          strength: "advisory"
+          text: >-
+            Differentially compare fixtures with the official ARD conformance
+            CLI without making that external tool a runtime dependency.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          ARD v0.91 uses /.well-known/ard.json and rel=ard; the ai-catalog path
+          and relation are predecessor compatibility only.
+        - >-
+          ARD v0.91 does not require the top-level specVersion or host members
+          demanded by IsIt's published fix text.
+        - >-
+          ARD already has an official schema and conformance CLI, so AgentReady
+          Lab must not claim to be the first ARD validator.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Resolve one explicitly selected URL entry under the normal network
+          policy and compare its media type with the declaration.
+      caveats:
+        - >-
+          Inline data and linked resources remain untrusted and must never be
+          executed.
+
+  - rule_id: "commerce.payment.x402"
+    rule_version: "0.1.0"
+    title: "x402"
+    category: "commerce"
+    maturity: "mixed"
+    implementation_status: "planned"
+    profiles: ["commerce", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "commerce-endpoint-required"
+      when: >-
+        The user declares a known x402-payable HTTP endpoint; inferred ecommerce
+        status alone is insufficient in spec mode.
+    source_refs:
+      - "isit-2026-08-28"
+      - "cloudflare-launch-2026-04-17"
+      - "x402-v2"
+      - "x402-repository"
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "x402.version"
+          strength: "normative"
+          text: >-
+            Pin x402 v2 and reject messages or headers that belong only to an
+            incompatible protocol version.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "x402.payment-required"
+          strength: "normative"
+          text: >-
+            At a declared payable endpoint, validate the HTTP 402 response and
+            the complete v2 PAYMENT-REQUIRED challenge object, encoding, and
+            required fields.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "x402.no-payment"
+          strength: "advisory"
+          text: >-
+            Stop after validating the challenge unless a future isolated test
+            explicitly authorizes a fixture payment flow.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          A site-wide scanner cannot exhaustively discover arbitrary payable
+          endpoints.
+        - >-
+          Challenge shape validation is narrower than payment settlement or
+          protected-resource delivery.
+    interop:
+      disposition: "known-endpoint-required"
+      safe_actions:
+        - >-
+          Send an unauthenticated request to an explicitly supplied fixture
+          endpoint and validate only the returned payment challenge.
+      caveats:
+        - >-
+          Never sign, submit, settle, or spend funds during a normal scan.
+
+  - rule_id: "commerce.payment.mpp"
+    rule_version: "0.1.0"
+    title: "MPP payment discovery"
+    category: "commerce"
+    maturity: "draft"
+    implementation_status: "planned"
+    profiles: ["commerce", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "commerce-endpoint-required"
+      when: >-
+        The user selects the commerce profile for a service claiming OpenAPI
+        payment discovery.
+    source_refs: ["isit-2026-08-28", "payment-discovery-00", "mpp-site"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "payment-discovery.document"
+          strength: "normative"
+          text: >-
+            For draft-payment-discovery-00, require HTTPS GET /openapi.json, a
+            successful application/json representation, and a valid OpenAPI 3.x
+            document.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "payment-discovery.operation"
+          strength: "normative"
+          text: >-
+            Validate payable operation responses and x-payment-info against the
+            draft's supplied JSON Schema and semantic constraints.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "payment-discovery.version"
+          strength: "advisory"
+          text: >-
+            Label every verdict with draft-00 because later drafts may change
+            path, schema, or extension semantics.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          The source is an individual work-in-progress draft intended as
+          Informational, not an RFC.
+        - >-
+          Do not conflate OpenAPI payment discovery with conformance to the MPP
+          runtime payment protocol.
+    interop:
+      disposition: "safe-read-only"
+      safe_actions:
+        - >-
+          Fetch and validate /openapi.json and resolve no payable operation
+          unless separately authorized.
+      caveats:
+        - >-
+          Never invoke an operation or submit payment credentials discovered in
+          OpenAPI.
+
+  - rule_id: "commerce.discovery.ucp"
+    rule_version: "0.1.0"
+    title: "Universal Commerce Protocol"
+    category: "commerce"
+    maturity: "mixed"
+    implementation_status: "planned"
+    profiles: ["commerce", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "commerce-endpoint-required"
+      when: "The target claims support for a pinned UCP date version."
+    source_refs: ["isit-2026-08-28", "ucp-2026-08-25"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "ucp.profile-wrapper"
+          strength: "normative"
+          text: >-
+            For UCP 2026-08-25, require the top-level ucp object and validate
+            its version, services, capabilities, and payment_handlers members
+            according to the pinned schema.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ucp.date-version"
+          strength: "normative"
+          text: >-
+            Interpret the declared YYYY-MM-DD UCP version using the matching
+            date-versioned specification and compatibility rules.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ucp.endpoints"
+          strength: "recommended"
+          text: >-
+            Validate declared endpoint URLs and service identifiers without
+            invoking commerce operations.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          Current UCP uses ucp.version inside a wrapper; it does not use IsIt's
+          documented top-level protocol_version shape.
+        - >-
+          A current spec-conformant profile can therefore fail the historical
+          compatibility heuristic.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future harness may resolve declared read-only service metadata in
+          controlled fixtures.
+      caveats:
+        - >-
+          Do not create carts, checkouts, orders, payment sessions, or mandates.
+
+  - rule_id: "commerce.discovery.acp"
+    rule_version: "0.1.0"
+    title: "Agentic Commerce Protocol"
+    category: "commerce"
+    maturity: "beta"
+    implementation_status: "planned"
+    profiles: ["commerce", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "commerce-endpoint-required"
+      when: "The target publicly advertises the beta ACP discovery profile."
+    source_refs: ["isit-2026-08-28", "acp-2026-04-17", "acp-site"]
+    spec:
+      claim_scope: "profile-conformance"
+      requirements:
+        - id: "acp.version"
+          strength: "normative"
+          text: >-
+            Pin the ACP 2026-04-17 beta schema and validate protocol name,
+            current and supported versions, and date-version negotiation.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "acp.discovery"
+          strength: "normative"
+          text: >-
+            Validate api_base_url, supported REST or MCP transports, and the
+            complete capabilities.services shape defined by the pinned beta
+            release.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "acp.beta-label"
+          strength: "advisory"
+          text: "Label results beta and avoid certification language."
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          ACP is explicitly beta and date-versioned.
+        - >-
+          Public discovery-document absence does not prove a merchant has no
+          private or onboarded ACP integration.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          A future controlled harness may resolve transport metadata without
+          creating commerce state.
+      caveats:
+        - >-
+          Never create carts, checkout sessions, orders, refunds, or delegated
+          payments in a scanner.
+
+  - rule_id: "commerce.payment.ap2"
+    rule_version: "0.1.0"
+    title: "Agent Payments Protocol"
+    category: "commerce"
+    maturity: "experimental"
+    implementation_status: "planned"
+    profiles: ["commerce", "full"]
+    runtime: ["http"]
+    applicability:
+      default: "commerce-endpoint-required"
+      when: >-
+        The target explicitly opts into AP2 compatibility or a pinned AP2
+        version.
+    source_refs: ["isit-2026-08-28", "ap2-v0.2", "ap2-repository", "a2a-v1.0"]
+    spec:
+      claim_scope: "no-current-conformance-claim"
+      requirements:
+        - id: "ap2.compat-legacy"
+          strength: "advisory"
+          text: >-
+            Keep the A2A extension detector only in the 2026-08-28 compatibility
+            profile and label it legacy v0.1 behavior.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+        - id: "ap2.v0.2"
+          strength: "normative"
+          text: >-
+            A future spec rule must implement AP2 v0.2 mandates, roles, schemas,
+            and security semantics from a pinned release rather than requiring
+            the removed Agent Card extension.
+          source_refs: []
+          params: []
+          excerpt_authorized: false
+          todo:
+            - "source_refs unassigned; see the ruleset todo"
+            - "params unassigned; see the ruleset todo"
+      deltas:
+        - >-
+          AP2 v0.2 dropped the legacy A2A Agent Card extension used by the
+          published IsIt heuristic.
+        - >-
+          A current AP2 v0.2 implementation may correctly omit that extension
+          and fail compat mode.
+        - >-
+          No AP2 v0.2 conformance claim belongs in the MVP until its mandate
+          validation and security model have dedicated fixtures and review.
+    interop:
+      disposition: "not-in-mvp"
+      safe_actions:
+        - >-
+          Future work may validate fixture mandates and signatures entirely
+          offline.
+      caveats:
+        - >-
+          Never create, sign, replay, or submit a live mandate or payment
+          authorization.

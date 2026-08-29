@@ -22,6 +22,22 @@ A decision is amended only by a new ADR. Superseding one does not edit it.
 
 ## Open questions recorded but not resolved
 
+- `source_ledger_version` sits inside the ruleset's verdict-bearing projection,
+  so a provenance-only ledger bump forces the ruleset digest to move even when
+  no rule, assertion, verdict, or message changed. Adding three vendor crawler
+  sources on 2026-08-29 moved the ruleset digest from `e9657e90` to `7915ecc0`
+  for exactly that reason, while the snapshot digest correctly stayed put. That
+  partly defeats the independent-version-axis purpose ADR-0008 section 1 gives
+  the ledger. Either the projection should carry the ledger version only when a
+  cited source actually changes, or a report should identify the ledger version
+  separately from the ruleset digest, as ADR-0007 already does. This surfaced
+  during implementation and belongs to whoever revisits ADR-0007 or ADR-0008.
+- `ledger_date` has no upper bound, because the project forbids a wall clock in
+  validation (`docs/TEST_STRATEGY.md` section 2.1). Requiring it to be no
+  earlier than the newest `verified_at` reports the inconsistency from the more
+  useful end, but it is logically equivalent to the per-entry ceiling and does
+  not prevent a date being laundered by moving the ceiling. What keeps it
+  honest is that moving it is a declared, reviewed, one-line edit.
 - The `discoverability` versus `discovery` category taxonomy, which disagrees
   with the `rule_id` namespaces and makes `@category:` selectors unpredictable
   (ADR-0008 section 6).
@@ -102,3 +118,22 @@ are defensible and they cannot both stand. Resolving it either narrows the
 compile test to three identifiers or removes `URL` from the allow-list, and
 either way it changes what a security control asserts, so it is a decision
 rather than a documentation fix.
+
+**Resolved on 2026-08-29: `URL` is permitted in `core` only, and forbidden in
+`rules-standard`.** The compile test keeps all four identifiers, and it keeps
+them where rule code lives. `URL` is a pure parser with no I/O, no clock and no
+randomness; `core` legitimately needs it to implement `context.resolve()`; and
+rules never construct a URL at all, because ADR-0002 has them call
+`context.resolve()` instead. Narrowing the test to three identifiers would have
+weakened it everywhere in order to permit something only one package needs.
+
+The change this requires is one line: remove the
+`"files": ["../../types/runtime-neutral-globals.d.ts"]` entry from
+`packages/rules-standard/tsconfig.json`, leaving it on
+`packages/core/tsconfig.json`. That file's own header, which says both packages
+are allowed to use its declarations, then needs correcting to name `core` only.
+`packages/rules-standard/src/` was verified to compile under
+`lib: ["ES2023"]`, `types: []` with no ambient globals file, so nothing else
+moves. The package tsconfig includes `src/**/*.ts` only, so the `new URL(...)`
+in `packages/rules-standard/test/index.test.ts` is unaffected: tests compile
+under the root `tsconfig.test.json` with `types: ["node"]`.

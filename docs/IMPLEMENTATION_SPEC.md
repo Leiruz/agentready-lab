@@ -170,6 +170,21 @@ The initial profiles are:
 | `commerce` | Explicitly agent-enabled commerce surface | selected discovery rules plus opt-in commerce rules |
 | `full` | Diagnostic exploration | every rule that can be evaluated safely |
 
+A profile answers which families of rules are worth running against a kind of
+target. It does not assert that every rule it selects describes something the
+target ought to deploy: the `content` profile selecting Content Signals means
+that a site publishing them will have them checked, and that a site not
+publishing them gets `not-applicable`. Profile membership grants selection, and
+applicability governs what absence means (ADR-0004 section 1).
+
+`--profile commerce` exits 2 in M1. The commerce rules are M6 work under
+ADR-0001 and `ROADMAP.md`, and the `profiles` arrays in `specs/checks.v0.yaml`
+do not implement the profile this table describes: no non-commerce check lists
+`commerce`. That data defect is recorded rather than silently patched, because
+adding `commerce` to eleven `profiles` arrays changes which rules run and
+belongs to the decision that introduces commerce, with fixtures. ADR-0004
+section 10 governs.
+
 Profiles must be versioned. CI configuration must pin an exact profile and
 ruleset version. Automatic target classification may suggest a profile, but it
 must not silently select scoring or failure semantics.
@@ -222,16 +237,26 @@ Unknown rule IDs or versions are configuration errors, not silently ignored.
 
 ### FR-3: Fetch planning
 
-Rules declare observations; they do not call global `fetch` directly. The scan
-planner deduplicates identical observations while keeping representations
-distinct. The cache key must include at least:
+Rules declare observations; they do not call global `fetch` directly. They
+declare them in two engine-driven rounds rather than in one literal list,
+because sitemap dereferencing, API Catalog link resolution, and the Agent Skills
+artifact fetch each name a URL found in a prior response (ADR-0002 section 1).
+The scan planner deduplicates identical observations while keeping
+representations distinct. The complete cache key is defined by ADR-0005 section
+3 and includes at least:
 
 - normalized URL;
 - method;
 - representation-affecting request headers, including `Accept`;
 - redirect policy;
+- maximum redirect count;
 - transport scope;
-- body limit.
+- `maxEncodedBytes` and `maxDecodedBytes`.
+
+Both byte limits belong in the key, not one "body limit". Two requests differing
+only in one of the two safety limits are two different safety postures, and
+merging them would hand the rule that lowered a limit the other rule's larger,
+or truncated, response.
 
 An HTML request and a Markdown-negotiation request must never share the same
 cached response.
@@ -380,13 +405,34 @@ code 3 means the scan as a whole could not safely continue.
 
 ## 11. Version axes
 
-The project has three independent public version axes:
+The project has six independent public version axes:
 
 | Surface | Field | Policy |
 | --- | --- | --- |
 | CLI and packages | `toolVersion` | Semantic Versioning |
 | JSON result shape | `schemaVersion` | Independent semantic version |
 | Rule definitions and interpretations | `ruleset.version` | Pinned immutable release |
+| Pinned source set | `sourceLedgerVersion` | Independent semantic version |
+| External compatibility snapshot | `externalSnapshot.capturedAt` | Frozen capture date |
+| Remediation text | `remediation_version` | Independent semantic version |
+
+This section named three axes until ADR-0008 split one registry file into three
+authorities and ADR-0007 moved remediation text into a fourth. The source ledger
+is versioned separately because a source's verification date changes for reasons
+that have nothing to do with either the snapshot or the executable ruleset; the
+snapshot's capture date is frozen because the snapshot records what a third
+party published on one day. ADR-0007 counts five axes rather than six: its list
+covers the pinned specification artifacts and does not include the tool's own
+package version, which this table has always carried.
+
+Four of the six reach the canonical report. `remediation_version` does not,
+because only the selected `summary` text enters a finding, and `toolVersion`
+appears as `tool.version`. `sourceLedgerVersion` is top level and
+`externalSnapshot` is present in `compat` mode only, where a compatibility
+verdict is a claim about a dated external inventory that the reader must be able
+to identify from the JSON alone. A second top-level `rulesetVersion` is
+deliberately not added, because `ruleset.version` already carries it and two
+fields that must be equal can only disagree.
 
 Reports also identify `profileVersion`, source snapshot dates, and selected
 mode. A rule interpretation change requires a new ruleset version even if the
@@ -407,7 +453,12 @@ type FindingStatus =
   | "unable-to-check"
   | "unsupported-runtime";
 
-type RequirementClass = "normative" | "recommended" | "advisory";
+type RequirementClass =
+  | "normative"
+  | "recommended"
+  | "advisory"
+  | "compatibility";
+type InterpretationMode = "spec" | "compat" | "interop";
 type SourceKind =
   | "compatibility-contract"
   | "ietf-rfc"
@@ -455,25 +506,35 @@ interface SourceReference {
 
 interface RuleFinding {
   code: string;
+  mode: InterpretationMode;
+  requirementClass: RequirementClass;
   status: FindingStatus;
-  requirementClass?: RequirementClass;
   message: string;
+  remediation?: {
+    class:
+      | "required-correction"
+      | "recommended-hardening"
+      | "compatibility-workaround";
+    summary: string;
+  };
   sourceRefs: Array<{ sourceId: string; section?: string }>;
   evidenceRefs: string[];
 }
 
-interface RuleEvaluation {
-  findings: RuleFinding[];
-}
-
-interface RuleDefinition {
+interface RuleMetadata {
   id: string;
-  externalCompatibilityId: string;
+  externalCompatibilityId: string | null;
   title: string;
   category: string;
   ruleVersion: string;
   ruleset: { id: string; version: string };
-  modes: Array<"spec" | "compat" | "interop">;
+  profiles: string[];
+  applicability:
+    | "applicable"
+    | "informational"
+    | "optional"
+    | "commerce-endpoint-required";
+  modes: InterpretationMode[];
   observationRuntime: ObservationRuntime[];
   sourceMaturity: SourceMaturity;
   implementationStatus:
@@ -483,27 +544,60 @@ interface RuleDefinition {
     | "deprecated"
     | "removed";
   sources: SourceReference[];
-  observations: ObservationRequest[];
-  evaluate(context: EvaluationContext): Promise<RuleEvaluation>;
+  assertions: AssertionDeclaration[];
+  roundTwoBudget: number;
+}
+
+interface RuleDefinition<Options = unknown> {
+  apiVersion: 1;
+  metadata: RuleMetadata;
+  defaultOptions: Readonly<Options>;
+  plan(input: PlanInput<Options>): ObservationRequest[];
+  step(context: RoundContext<Options>): RequestBatch | AssertionOutcomes;
+  finish(context: RoundContext<Options>): AssertionOutcomes;
 }
 ```
 
+ADR-0002 declares the enforced form of these types, with `readonly` throughout,
+and declares `AssertionDeclaration`, `PlanInput`, `RoundContext`,
+`ObservationRequest`, `RequestBatch`, and `AssertionOutcomes`. This block is the
+conceptual shape and does not restate them.
+
+A rule is three pure synchronous functions over exactly two engine-driven
+rounds. `plan()` runs before any request and returns the rule's complete
+round-one request list. `step()` returns either one ordered batch of discovered
+requests or the rule's final assertion outcomes. `finish()` runs only for a rule
+whose `step()` returned a batch. This section previously gave `RuleDefinition` a
+literal `observations` array and an asynchronous `evaluate()`. Neither survives:
+a literal array cannot express the AI crawler rule's configured tested path or
+the Markdown rule's configured `Accept` value, both of which come from
+`rules.options`, and imperative probing makes plan-time budget reservation
+impossible. ADR-0002 sections 1 and 4 govern.
+
 Rules are built-in and compiled for the MVP. Dynamic JavaScript rule loading is
 prohibited because it converts a data-validation tool into a code-execution
-platform.
+platform. A synchronous signature is not a sandbox and no release gate may treat
+it as one; ADR-0002 section 2 records the controls that actually keep rule code
+away from I/O, the clock, and randomness.
 
-In `specs/checks.v0.yaml`, `rule_id` maps to native `id`; the separate camelCase
-`id` maps to `externalCompatibilityId`; `rule_version` maps to `ruleVersion`;
-the top-level `ruleset_id` and `ruleset_version` map to `ruleset`; `runtime`
-maps to `observationRuntime`; and `maturity` maps to `sourceMaturity`.
-Implementation status comes from project release metadata, never from source
-maturity. The external compatibility key must not leak into native selectors or
-reports.
+In the registry, `rule_id` maps to native `id`; the separate camelCase `id` maps
+to `externalCompatibilityId`, which is `null` for a native rule with no external
+counterpart; `rule_version` maps to `ruleVersion`; the native ruleset manifest's
+top-level `ruleset_id` and `ruleset_version` map to `ruleset`; `runtime` maps to
+`observationRuntime`; `maturity` maps to `sourceMaturity`; `profiles` maps to
+`profiles`; and `applicability.default` maps to `applicability` under the
+renamed native values of ADR-0004 section 2. Implementation status comes from
+the native ruleset manifest and from nowhere else, never from source maturity
+and never from `PROJECT_STATUS.md` (ADR-0008 section 3). The external
+compatibility key must not leak into native selectors or reports.
 
-A rule evaluator returns findings only. The core validates those findings,
-derives the aggregate rule status using section 13's fixed precedence, and
-constructs the public result. Rule code cannot return a contradictory overall
-status.
+A rule evaluator returns assertion outcomes, not findings, and never a status, a
+requirement class, a message string, or a source citation. The core derives each
+finding's status from the ruleset's immutable class mapping, derives its
+citations from the assertion declaration, renders its prose from a static
+template with validated typed parameters, then derives the aggregate rule status
+using section 13's fixed precedence and constructs the public result. Rule code
+cannot return a contradictory overall status.
 
 ### 12.1 Source reference requirements
 
@@ -531,9 +625,10 @@ Illustrative shape:
   "schemaVersion": "1.0.0",
   "ruleset": {
     "id": "standard",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
   },
+  "sourceLedgerVersion": "0.2.0",
   "profile": { "id": "content", "version": "0.1.0" },
   "mode": "spec",
   "target": {
@@ -567,39 +662,55 @@ Illustrative shape:
       "ruleId": "web.content.markdown-negotiation",
       "ruleVersion": "0.1.0",
       "status": "warning",
+      "gate": "enforced",
       "findings": [
         {
           "code": "markdown.media-type",
-          "status": "pass",
+          "mode": "spec",
           "requirementClass": "normative",
+          "status": "pass",
           "message": "The negotiated response uses text/markdown.",
           "sourceRefs": [{ "sourceId": "rfc7763", "section": "2" }],
-          "evidenceRefs": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"]
+          "evidenceRefs": ["ev-001"]
         },
         {
           "code": "markdown.vary",
-          "status": "warning",
+          "mode": "spec",
           "requirementClass": "recommended",
+          "status": "warning",
           "message": "The response varies by Accept but does not declare Vary: Accept.",
+          "remediation": {
+            "class": "recommended-hardening",
+            "summary": "Add Accept to the Vary response header so a shared cache cannot serve the HTML representation to a Markdown request."
+          },
           "sourceRefs": [{ "sourceId": "rfc9110", "section": "12.5.5" }],
-          "evidenceRefs": ["sha256:0000000000000000000000000000000000000000000000000000000000000000"]
+          "evidenceRefs": ["ev-001"]
         }
       ]
     }
   ],
+  "effectiveOptions": [
+    {
+      "ruleId": "web.content.markdown-negotiation",
+      "options": {
+        "negotiatedMediaType": { "kind": "string", "value": "text/markdown" },
+        "profileRequiresMarkdown": { "kind": "boolean", "value": true }
+      }
+    }
+  ],
   "evidence": [
     {
-      "id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "id": "ev-001",
       "kind": "http",
       "request": {
         "method": "GET",
         "url": "http://127.0.0.1:3000/",
-        "headers": { "accept": "text/markdown" }
+        "headers": { "accept": ["text/markdown"] }
       },
       "outcome": {
         "kind": "response",
         "status": 200,
-        "headers": { "content-type": "text/markdown; charset=utf-8" },
+        "headers": { "content-type": ["text/markdown; charset=utf-8"] },
         "encodedBytes": 8,
         "decodedBytes": 8,
         "bodySha256": "90f8ec5669cd34183b9b0fdf8b94f5efb4c3672876330f4aa76088c2b4ad17be",
@@ -607,34 +718,92 @@ Illustrative shape:
         "redirects": []
       }
     }
+  ],
+  "sources": [
+    {
+      "id": "rfc7763",
+      "title": "RFC 7763: The text/markdown Media Type",
+      "url": "https://www.rfc-editor.org/rfc/rfc7763",
+      "kind": "ietf-rfc",
+      "status": "informational-rfc",
+      "version": "RFC 7763",
+      "verifiedAt": "2026-08-28"
+    },
+    {
+      "id": "rfc9110",
+      "title": "RFC 9110: HTTP Semantics",
+      "url": "https://www.rfc-editor.org/rfc/rfc9110",
+      "kind": "ietf-rfc",
+      "status": "internet-standard",
+      "version": "RFC 9110 / STD 97",
+      "verifiedAt": "2026-08-28"
+    }
   ]
 }
 ```
 
-The all-zero ruleset and evidence digests are illustrative placeholders in this
-proposed shape. A real report contains the SHA-256 digest of the exact immutable
-ruleset artifact and hashes each canonical sanitized observation.
+The all-zero ruleset digest is an illustrative placeholder in this proposed
+shape; a real report contains the SHA-256 digest of the exact immutable ruleset
+artifact. The option keys are illustrative too: no accepted decision pins the
+option names of any rule, only that seven of the eight M1 rules take options and
+that the report records every validated effective value.
+
+Evidence IDs are `ev-` followed by a three-digit zero-padded decimal, assigned
+per round in stable plan order once that round's plan is frozen. An earlier
+revision of this section made an evidence ID the hash of the canonical sanitized
+observation; ADR-0005 section 5 replaced that with the plan-order sequence,
+which is the property determinism actually requires, and left the content digest
+in `bodySha256`. A run whose reservation count would exceed 999 exits 2, so the
+format stays fixed-width and the lexical sort equals the numeric sort. Because
+IDs shift when the plan changes, `report diff` compares evidence through the
+findings that reference it, keyed by `(ruleId, findingCode)`, never by raw ID.
 
 Each result contains all assertion findings for one rule. The result status is
 derived with fixed precedence: `fail`, `unable-to-check`,
 `unsupported-runtime`, `warning`, `pass`, then `not-applicable`.
-`not-applicable` cannot coexist with an evaluated finding. Summary counters count
+`not-applicable` cannot coexist with an evaluated finding. A result's `gate` is
+a separate axis: only an `enforced` result reaches the exit code, and an
+`informational` one is still reported and still counted. Summary counters count
 derived rule-result statuses, not individual findings. Findings reference the
 top-level, deduplicated `evidence` array by ID; evidence is never embedded in a
 result. Results use registry order and rule ID, findings use stable assertion
 code order, and evidence sorts by ID.
 
+The report is self-contained about what decided it. `sources` carries the pinned
+sources a finding in this report cites, projected from the source ledger at
+build time and filtered to those citations; a finding citing a `sourceId` absent
+from that array is a contract-test failure, and no source URL is resolved during
+a scan or at report time. `sourceLedgerVersion` names the ledger those entries
+came from. In `compat` mode an `externalSnapshot` object carrying the snapshot's
+`capturedAt` and `schemaVersion` is required, and in every other mode it is
+forbidden. `effectiveOptions` records the complete validated option set of every
+selected rule, including values taken from a rule's defaults, because two
+reports can disagree while requesting the identical resource and a reader must
+be able to see why. A `fail` or `warning` finding carries `remediation`, whose
+text lives in `specs/remediation.v0.yaml` keyed by finding code. ADR-0007 and
+ADR-0004 section 8 govern these fields.
+
+Evidence request and response headers are multi-valued. A single-valued map
+cannot represent the repeated `Link` field lines that the fixture catalog
+requires, so each field name maps to an ordered list of field values.
+
 Evidence is a discriminated `http`, `dns`, or `browser` observation. Its
 `outcome` is either the success shape for that observation kind or
 `{ "kind": "error", "error": ... }`. The error has a stable `code`, processing
-`phase`, bounded sanitized `message`, and `retryable` boolean. Version 1 error
-codes are `url-policy-blocked`, `dns-resolution-failed`, `dns-answer-blocked`,
-`connect-timeout`, `connection-failed`, `tls-failed`, `request-timeout`,
-`redirect-limit`, `request-budget-exhausted`, `response-limit`,
-`decode-failed`, `parse-failed`, `aborted`, and `unsupported-runtime`. A blocked
-or failed observation never fabricates an HTTP response, DNS answer, or browser
-fact. The report JSON Schema must encode these branches as mutually exclusive
-discriminated unions and contract tests must cover every error code.
+`phase`, bounded sanitized `message`, and `retryable` boolean. The 15 version 1
+error codes are `url-policy-blocked`, `dns-resolution-failed`,
+`dns-answer-blocked`, `connect-timeout`, `connection-failed`, `tls-failed`,
+`request-timeout`, `redirect-limit`, `request-budget-exhausted`,
+`resource-budget-exhausted`, `response-limit`, `decode-failed`, `parse-failed`,
+`aborted`, and `unsupported-runtime`. ADR-0003 added
+`resource-budget-exhausted` to the 14 this section first listed, so that a parse
+stopped by its own budget is distinguishable from an ordinary parse failure, and
+it is the only error vocabulary in the report and in every reporter. A document
+the target served that is merely invalid is not an observation failure at all:
+it is an assertion outcome. A blocked or failed observation never fabricates an
+HTTP response, DNS answer, or browser fact. The report JSON Schema must encode
+these branches as mutually exclusive discriminated unions and contract tests
+must cover every error code.
 
 The canonical report omits timestamps, durations, random IDs, and other volatile
 fields. With `--include-metadata`, an outer envelope may add `generatedAt` and

@@ -4,7 +4,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validateAgainstSchema } from "../src/schema/json-schema.js";
 import { canonicalizeJson } from "../src/schema/canonical-json.js";
 import { sha256HexOfUtf8 } from "../src/schema/sha256.js";
-import type { RegistryIssue } from "../../../scripts/lib/validate-registry.js";
+import type {
+  RegistryIssue,
+  RegistryValidationResult,
+} from "../../../scripts/lib/validate-registry.js";
 import { validateRegistry } from "../../../scripts/lib/validate-registry.js";
 
 // This is the merge-blocking half of `specs/README.md` "Validation". The other
@@ -19,10 +22,17 @@ function readSpec(name: string): string {
   );
 }
 
-const REGISTRY = readSpec("checks.v0.yaml");
-const SCHEMA = readSpec("rule.schema.json");
-const COMMITTED_CANONICAL = readSpec("checks.v0.canonical.json");
-const COMMITTED_DIGEST = readSpec("checks.v0.digest.txt");
+const SNAPSHOT = readSpec("checks.v0.yaml");
+const SNAPSHOT_SCHEMA = readSpec("rule.schema.json");
+const LEDGER = readSpec("sources.v0.yaml");
+const LEDGER_SCHEMA = readSpec("sources.schema.json");
+const RULESET = readSpec("ruleset.standard.v0.yaml");
+const RULESET_SCHEMA = readSpec("ruleset.schema.json");
+
+const SNAPSHOT_CANONICAL = readSpec("checks.v0.canonical.json");
+const SNAPSHOT_DIGEST = readSpec("checks.v0.digest.txt");
+const RULESET_CANONICAL = readSpec("ruleset.standard.v0.canonical.json");
+const RULESET_DIGEST = readSpec("ruleset.standard.v0.digest.txt");
 
 // ---------------------------------------------------------------------------
 // Network sentinel
@@ -72,62 +82,88 @@ describe("the network sentinel itself", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The registry as committed
+// Harness
 // ---------------------------------------------------------------------------
 
-async function validate(
-  registryYaml: string,
-): Promise<readonly RegistryIssue[]> {
-  const result = await validateRegistry({
-    registryYaml,
-    schemaJson: SCHEMA,
+/** One of the three authorities, replaced; the other two as committed. */
+interface Override {
+  readonly snapshotYaml?: string;
+  readonly ledgerYaml?: string;
+  readonly rulesetYaml?: string;
+}
+
+async function run(override: Override = {}): Promise<RegistryValidationResult> {
+  return validateRegistry({
+    snapshotYaml: override.snapshotYaml ?? SNAPSHOT,
+    snapshotSchemaJson: SNAPSHOT_SCHEMA,
+    ledgerYaml: override.ledgerYaml ?? LEDGER,
+    ledgerSchemaJson: LEDGER_SCHEMA,
+    rulesetYaml: override.rulesetYaml ?? RULESET,
+    rulesetSchemaJson: RULESET_SCHEMA,
     committed: null,
   });
-  return result.issues;
+}
+
+async function validate(
+  override: Override = {},
+): Promise<readonly RegistryIssue[]> {
+  return (await run(override)).issues;
 }
 
 const codesOf = (issues: readonly RegistryIssue[]): readonly string[] =>
   issues.map((issue) => issue.code);
 
-describe("specs/checks.v0.yaml as committed", () => {
+// ---------------------------------------------------------------------------
+// The three authorities as committed
+// ---------------------------------------------------------------------------
+
+describe("specs/ as committed", () => {
   it("has no validation issues at all", async () => {
     const result = await validateRegistry({
-      registryYaml: REGISTRY,
-      schemaJson: SCHEMA,
+      snapshotYaml: SNAPSHOT,
+      snapshotSchemaJson: SNAPSHOT_SCHEMA,
+      ledgerYaml: LEDGER,
+      ledgerSchemaJson: LEDGER_SCHEMA,
+      rulesetYaml: RULESET,
+      rulesetSchemaJson: RULESET_SCHEMA,
       committed: {
-        canonicalJson: COMMITTED_CANONICAL,
-        digest: COMMITTED_DIGEST,
+        snapshot: {
+          canonicalJson: SNAPSHOT_CANONICAL,
+          digest: SNAPSHOT_DIGEST,
+        },
+        ruleset: { canonicalJson: RULESET_CANONICAL, digest: RULESET_DIGEST },
       },
     });
     expect(result.issues).toStrictEqual([]);
   });
 
-  it("keeps the committed canonical JSON and digest current", async () => {
-    const result = await validateRegistry({
-      registryYaml: REGISTRY,
-      schemaJson: SCHEMA,
-      committed: null,
-    });
+  it("keeps both committed canonical JSON files and digests current", async () => {
+    const result = await run();
     expect(result.artifacts).not.toBeNull();
-    expect(result.artifacts?.canonicalJson).toBe(COMMITTED_CANONICAL);
-    expect(result.artifacts?.digest).toBe(COMMITTED_DIGEST.trim());
+    expect(result.artifacts?.snapshot.canonicalJson).toBe(SNAPSHOT_CANONICAL);
+    expect(result.artifacts?.snapshot.digest).toBe(SNAPSHOT_DIGEST.trim());
+    expect(result.artifacts?.ruleset.canonicalJson).toBe(RULESET_CANONICAL);
+    expect(result.artifacts?.ruleset.digest).toBe(RULESET_DIGEST.trim());
   });
 
-  it("produces a digest that is SHA-256 over the canonical bytes", async () => {
-    const hex = await sha256HexOfUtf8(COMMITTED_CANONICAL);
-    expect(COMMITTED_DIGEST.trim()).toBe(`sha256:${hex}`);
+  it("produces digests that are SHA-256 over the canonical bytes", async () => {
+    expect(SNAPSHOT_DIGEST.trim()).toBe(
+      `sha256:${await sha256HexOfUtf8(SNAPSHOT_CANONICAL)}`,
+    );
+    expect(RULESET_DIGEST.trim()).toBe(
+      `sha256:${await sha256HexOfUtf8(RULESET_CANONICAL)}`,
+    );
   });
 
-  it("covers only the verdict-bearing projection", () => {
-    const projection = JSON.parse(COMMITTED_CANONICAL) as {
-      checks: Record<string, unknown>[];
-    };
-    const record: unknown = JSON.parse(COMMITTED_CANONICAL);
+  it("seals the snapshot on its own identity, not on a ruleset it no longer carries", () => {
+    const record: unknown = JSON.parse(SNAPSHOT_CANONICAL);
+    // ADR-0008 section 2 migrated `ruleset_id` and `ruleset_version` out of
+    // this file, so the snapshot's identity is now its capture date.
     expect(Object.keys(record as object)).toStrictEqual([
+      "captured_at",
       "checks",
-      "ruleset_id",
-      "ruleset_version",
     ]);
+    const projection = record as { checks: Record<string, unknown>[] };
     expect(projection.checks).toHaveLength(22);
     for (const check of projection.checks) {
       expect(Object.keys(check)).toStrictEqual([
@@ -153,14 +189,173 @@ describe("specs/checks.v0.yaml as committed", () => {
       '"sources"',
       '"registry_version"',
     ]) {
-      expect(COMMITTED_CANONICAL).not.toContain(excluded);
+      expect(SNAPSHOT_CANONICAL).not.toContain(excluded);
     }
   });
 
-  it("is itself canonical JSON, so re-canonicalizing it is a no-op", () => {
-    expect(canonicalizeJson(JSON.parse(COMMITTED_CANONICAL))).toBe(
-      COMMITTED_CANONICAL,
+  it("covers only the ruleset's verdict-bearing projection", () => {
+    const record: unknown = JSON.parse(RULESET_CANONICAL);
+    expect(Object.keys(record as object)).toStrictEqual([
+      "rules",
+      "ruleset_id",
+      "ruleset_version",
+      "source_ledger_version",
+    ]);
+    const projection = record as { rules: Record<string, unknown>[] };
+    expect(projection.rules).toHaveLength(22);
+    for (const rule of projection.rules) {
+      expect(Object.keys(rule)).toStrictEqual([
+        "applicability",
+        "compat_assertions",
+        "implementation_status",
+        "profiles",
+        "retired_requirements",
+        "rule_id",
+        "rule_version",
+        "runtime",
+        "source_refs",
+        "spec",
+      ]);
+    }
+    for (const excluded of ['"title"', '"maturity"', '"deltas"', '"interop"']) {
+      expect(RULESET_CANONICAL).not.toContain(excluded);
+    }
+  });
+
+  it("is itself canonical JSON, so re-canonicalizing is a no-op", () => {
+    expect(canonicalizeJson(JSON.parse(SNAPSHOT_CANONICAL))).toBe(
+      SNAPSHOT_CANONICAL,
     );
+    expect(canonicalizeJson(JSON.parse(RULESET_CANONICAL))).toBe(
+      RULESET_CANONICAL,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The case ADR-0008's first revision rejected
+// ---------------------------------------------------------------------------
+
+describe("the M1 data ADR-0008 section 5 requires to be accepted", () => {
+  it("accepts snapshot 0.1.0 beside ruleset 0.2.0 and prints the difference", async () => {
+    // The removed equality invariant. `specs/checks.v0.yaml` records `0.1.0`
+    // for both bumped rules, the file is frozen, and the ruleset creates them
+    // at `0.2.0`.
+    expect(SNAPSHOT).toContain('rule_id: "web.policy.ai-crawler"');
+    expect(RULESET).toContain('rule_id: "web.policy.ai-crawler"');
+
+    const result = await run();
+    expect(result.issues).toStrictEqual([]);
+
+    const deltas = result.notes.filter(
+      (note) => note.code === "rule-version-delta",
+    );
+    expect(deltas).toHaveLength(2);
+    for (const delta of deltas) {
+      expect(delta.message).toContain("ruleset 0.2.0, snapshot 0.1.0");
+    }
+  });
+
+  it("treats content-signals.syntax as retired rather than declared or dropped", async () => {
+    expect(SNAPSHOT).toContain('id: "content-signals.syntax"');
+    expect(RULESET).toContain('- id: "content-signals.syntax"\n        adr:');
+    // Declared nowhere in the ruleset's requirements.
+    expect(RULESET).not.toContain('        - id: "content-signals.syntax"');
+
+    const result = await run();
+    expect(codesOf(result.issues)).not.toContain("dropped-requirement");
+    expect(
+      result.notes.filter((note) => note.code === "requirement-retired"),
+    ).toHaveLength(1);
+  });
+
+  it("lists exactly the three additions the decisions specify", async () => {
+    const added = (await run()).notes
+      .filter((note) => note.code === "requirement-added")
+      .map((note) => note.message);
+    expect(added).toHaveLength(3);
+    expect(added.join("\n")).toContain('"ai-rules.effective-access"');
+    expect(added.join("\n")).toContain(
+      '"content-signals.conflicting-declaration"',
+    );
+    expect(added.join("\n")).toContain(
+      '"content-signals.unrecognized-vocabulary"',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two artifacts, two clocks
+//
+// ADR-0008 section 1 versions the ledger independently "because a source's
+// verification date changes for reasons that have nothing to do with" the
+// snapshot. Bounding every `verified_at` by `snapshot.captured_at`
+// contradicted that and made a source verified after the snapshot was
+// captured impossible to record at all. Each file now declares its own
+// ceiling, and neither is a wall clock.
+// ---------------------------------------------------------------------------
+
+describe("the ledger's own date axis", () => {
+  it("records sources verified after the snapshot was captured", async () => {
+    expect(SNAPSHOT).toContain('captured_at: "2026-08-28"');
+    expect(LEDGER).toContain('ledger_date: "2026-08-29"');
+    // Not hypothetical: the vendor crawler-token sources were verified the day
+    // after the snapshot was captured, so the snapshot-bounded ceiling
+    // rejected the committed ledger.
+    expect(LEDGER).toContain('verified_at: "2026-08-29"');
+    expect(await validate()).toStrictEqual([]);
+  });
+
+  it("treats ledger_date as an inclusive ceiling", async () => {
+    const onTheDay = LEDGER.replace(
+      'verified_at: "2026-08-28"',
+      'verified_at: "2026-08-29"',
+    );
+    expect(onTheDay).not.toBe(LEDGER);
+    expect(codesOf(await validate({ ledgerYaml: onTheDay }))).not.toContain(
+      "future-date",
+    );
+  });
+
+  it("does not bound a ledger date by the snapshot's capture date", async () => {
+    // The snapshot's own date moves back a week and no ledger entry is
+    // affected, which is the whole of the fix.
+    expect(LEDGER).toContain('verified_at: "2026-08-28"');
+    const earlier = SNAPSHOT.replace(
+      'captured_at: "2026-08-28"',
+      'captured_at: "2026-08-21"',
+    );
+    expect(earlier).not.toBe(SNAPSHOT);
+    expect(codesOf(await validate({ snapshotYaml: earlier }))).not.toContain(
+      "future-date",
+    );
+  });
+
+  it("names the ledger date, not the snapshot date, when it rejects one", async () => {
+    const late = LEDGER.replace(
+      'verified_at: "2026-08-28"',
+      'verified_at: "2026-08-30"',
+    );
+    const issue = (await validate({ ledgerYaml: late })).find(
+      (candidate) => candidate.code === "future-date",
+    );
+    expect(issue?.message).toContain("ledger date 2026-08-29");
+    expect(issue?.location).toContain("specs/sources.v0.yaml");
+  });
+
+  it("reports a lowered ceiling on ledger_date itself, not only on the entries", async () => {
+    // Both ends of the same inconsistency. The per-entry `future-date` issues
+    // say every later source is wrong; the `ledger_date` issue says the one
+    // field a maintainer actually needs to look at is wrong.
+    const lowered = LEDGER.replace(
+      'ledger_date: "2026-08-29"',
+      'ledger_date: "2026-08-01"',
+    );
+    const issue = (await validate({ ledgerYaml: lowered })).find(
+      (candidate) => candidate.code === "ledger-date-before-verification",
+    );
+    expect(issue?.location).toBe("specs/sources.v0.yaml#/ledger_date");
+    expect(issue?.message).toContain("2026-08-29");
   });
 });
 
@@ -170,11 +365,11 @@ describe("specs/checks.v0.yaml as committed", () => {
 
 describe("format keyword behaviour", () => {
   // Under Draft 2020-12, `format` is an annotation and asserts nothing unless
-  // the format-assertion vocabulary is declared. `rule.schema.json` does not
+  // the format-assertion vocabulary is declared. `sources.schema.json` does not
   // declare it. Whether a validator asserts anyway is therefore a property of
   // the dependency, not of the contract, and this suite records which it is
   // rather than assuming.
-  const brokenDate = REGISTRY.replace(
+  const brokenDate = LEDGER.replace(
     'verified_at: "2026-08-28"',
     'verified_at: "yesterday"',
   );
@@ -182,7 +377,7 @@ describe("format keyword behaviour", () => {
   it("is a property of the library, not of the schema", async () => {
     const { parse } = await import("yaml");
     const data: unknown = parse(brokenDate);
-    const violations = validateAgainstSchema(data, JSON.parse(SCHEMA));
+    const violations = validateAgainstSchema(data, JSON.parse(LEDGER_SCHEMA));
     const formatViolations = violations.filter(
       (violation) => violation.keyword === "format",
     );
@@ -201,11 +396,11 @@ describe("format keyword behaviour", () => {
     // A `format: date` value that is a real, well-formed date in the future,
     // and a `format: uri` value that parses but is plaintext HTTP. Both are
     // schema-clean under any conforming validator.
-    const future = REGISTRY.replace(
+    const future = LEDGER.replace(
       'verified_at: "2026-08-28"',
       'verified_at: "2099-01-01"',
     );
-    const insecure = REGISTRY.replace(
+    const insecure = LEDGER.replace(
       'url: "https://www.rfc-editor.org/rfc/rfc9309"',
       'url: "http://www.rfc-editor.org/rfc/rfc9309"',
     );
@@ -214,13 +409,17 @@ describe("format keyword behaviour", () => {
       const { parse } = await import("yaml");
       const violations = validateAgainstSchema(
         parse(mutated) as unknown,
-        JSON.parse(SCHEMA),
+        JSON.parse(LEDGER_SCHEMA),
       );
       expect(violations).toStrictEqual([]);
     }
 
-    expect(codesOf(await validate(future))).toContain("future-date");
-    expect(codesOf(await validate(insecure))).toContain("insecure-url");
+    expect(codesOf(await validate({ ledgerYaml: future }))).toContain(
+      "future-date",
+    );
+    expect(codesOf(await validate({ ledgerYaml: insecure }))).toContain(
+      "insecure-url",
+    );
   });
 });
 
@@ -228,8 +427,8 @@ describe("format keyword behaviour", () => {
 // Mutations
 //
 // A validator that passes on good input proves nothing. Each case below is a
-// defect the registry could plausibly acquire in review, applied to a copy of
-// the committed text.
+// defect the data could plausibly acquire in review, applied to a copy of the
+// committed text of exactly one of the three files.
 // ---------------------------------------------------------------------------
 
 /** Appends a syntactically complete 23rd check by copying the first one. */
@@ -248,13 +447,17 @@ function withTwentyThirdCheck(yaml: string): string {
   return `${yaml.trimEnd()}\n\n${block}`;
 }
 
+type Which = "snapshotYaml" | "ledgerYaml" | "rulesetYaml";
+
 const MUTATIONS: readonly {
   readonly name: string;
+  readonly file: Which;
   readonly code: string;
   readonly mutate: (yaml: string) => string;
 }[] = [
   {
     name: "a duplicate YAML key",
+    file: "snapshotYaml",
     code: "yaml-parse-error",
     mutate: (yaml) =>
       yaml.replace(
@@ -263,7 +466,18 @@ const MUTATIONS: readonly {
       ),
   },
   {
-    name: "a duplicate rule_id",
+    name: "a duplicate rule_id in the snapshot",
+    file: "snapshotYaml",
+    code: "duplicate-rule-id",
+    mutate: (yaml) =>
+      yaml.replace(
+        'rule_id: "web.discovery.sitemap"',
+        'rule_id: "web.discovery.robots"',
+      ),
+  },
+  {
+    name: "a duplicate rule_id in the ruleset",
+    file: "rulesetYaml",
     code: "duplicate-rule-id",
     mutate: (yaml) =>
       yaml.replace(
@@ -273,16 +487,19 @@ const MUTATIONS: readonly {
   },
   {
     name: "a duplicate compatibility check id",
+    file: "snapshotYaml",
     code: "duplicate-check-id",
     mutate: (yaml) => yaml.replace('id: "sitemap"', 'id: "robotsTxt"'),
   },
   {
     name: "a non-contiguous ordinal",
+    file: "snapshotYaml",
     code: "ordinal-not-contiguous",
     mutate: (yaml) => yaml.replace("- ordinal: 22", "- ordinal: 23"),
   },
   {
     name: "an out-of-order ordinal",
+    file: "snapshotYaml",
     code: "ordinal-not-ascending",
     mutate: (yaml) =>
       yaml
@@ -293,7 +510,8 @@ const MUTATIONS: readonly {
         ),
   },
   {
-    name: "a source_refs entry that resolves to nothing",
+    name: "a snapshot source_refs entry that resolves to nothing",
+    file: "snapshotYaml",
     code: "unresolved-source-ref",
     mutate: (yaml) =>
       yaml.replace(
@@ -302,33 +520,77 @@ const MUTATIONS: readonly {
       ),
   },
   {
-    name: "a source no check references",
-    code: "orphan-source",
+    // ADR-0008: "a source identifier used anywhere that the ledger does not
+    // declare". `robotsTxt` is a snapshot identifier, not a ledger source, and
+    // citing one where the other belongs is the realistic confusion.
+    name: "a ruleset assertion citing a snapshot identifier instead of a ledger source",
+    file: "rulesetYaml",
+    code: "unresolved-source-ref",
     mutate: (yaml) =>
-      yaml
-        .replaceAll('"sitemaps-protocol", ', "")
-        .replaceAll(', "sitemaps-protocol"', ""),
+      yaml.replace(
+        '- source: "content-signals-draft-00"',
+        '- source: "robotsTxt"',
+      ),
+  },
+  {
+    name: "a source no check and no rule references",
+    file: "ledgerYaml",
+    code: "orphan-source",
+    // The ledger is the only file mutated, so the citation has to be broken
+    // from this side: renaming the id leaves the original referenced by both
+    // other files and the new one referenced by neither.
+    mutate: (yaml) =>
+      yaml.replace('- id: "sitemaps-protocol"', '- id: "sitemaps-protocol-v2"'),
   },
   {
     name: "a verified_at of yesterday",
+    file: "ledgerYaml",
     code: "malformed-date",
     mutate: (yaml) =>
       yaml.replace('verified_at: "2026-08-28"', 'verified_at: "yesterday"'),
   },
   {
     name: "a verified_at that is not a real calendar date",
+    file: "ledgerYaml",
     code: "impossible-date",
     mutate: (yaml) =>
       yaml.replace('verified_at: "2026-08-28"', 'verified_at: "2026-02-30"'),
   },
   {
-    name: "a verified_at after the snapshot date",
+    // The ledger's ceiling is `ledger_date`, not `snapshot.captured_at`
+    // (ADR-0008 section 1). 2026-08-30 is one day past the declared ledger
+    // date; 2026-08-29 is the ledger date itself and is accepted, which the
+    // "two clocks" suite below asserts.
+    name: "a verified_at after the ledger date",
+    file: "ledgerYaml",
     code: "future-date",
     mutate: (yaml) =>
-      yaml.replace('verified_at: "2026-08-28"', 'verified_at: "2026-08-29"'),
+      yaml.replace('verified_at: "2026-08-28"', 'verified_at: "2026-08-30"'),
+  },
+  {
+    name: "a ledger_date earlier than the newest verified_at",
+    file: "ledgerYaml",
+    code: "ledger-date-before-verification",
+    mutate: (yaml) =>
+      yaml.replace('ledger_date: "2026-08-29"', 'ledger_date: "2026-08-01"'),
+  },
+  {
+    name: "a ledger_date that is not a real calendar date",
+    file: "ledgerYaml",
+    code: "impossible-date",
+    mutate: (yaml) =>
+      yaml.replace('ledger_date: "2026-08-29"', 'ledger_date: "2026-02-30"'),
+  },
+  {
+    name: "a snapshot captured_at that is not a real calendar date",
+    file: "snapshotYaml",
+    code: "impossible-date",
+    mutate: (yaml) =>
+      yaml.replace('captured_at: "2026-08-28"', 'captured_at: "2026-02-30"'),
   },
   {
     name: "an http:// source URL",
+    file: "ledgerYaml",
     code: "insecure-url",
     mutate: (yaml) =>
       yaml.replace(
@@ -338,70 +600,188 @@ const MUTATIONS: readonly {
   },
   {
     name: "a 23rd check",
+    file: "snapshotYaml",
     code: "unexpected-check-count",
     mutate: withTwentyThirdCheck,
   },
   {
-    name: "an assertion id reused by another rule",
+    name: "an assertion id reused by another rule in the snapshot",
+    file: "snapshotYaml",
     code: "duplicate-requirement-id",
     mutate: (yaml) =>
       yaml.replace('id: "sitemap.xml"', 'id: "robots.location"'),
   },
   {
+    name: "an assertion id reused by another rule in the ruleset",
+    file: "rulesetYaml",
+    code: "duplicate-assertion-id",
+    mutate: (yaml) =>
+      yaml.replace('- id: "sitemap.xml"', '- id: "robots.location"'),
+  },
+  {
     name: "a duplicate source id",
+    file: "ledgerYaml",
     code: "duplicate-source-id",
     mutate: (yaml) => yaml.replace('- id: "rfc8288"', '- id: "rfc9309"'),
   },
+
+  // --- ADR-0008's new invariants ------------------------------------------
+
+  {
+    name: "a retirement with no adr",
+    file: "rulesetYaml",
+    code: "retirement-without-adr",
+    mutate: (yaml) => yaml.replace('        adr: "ADR-0009"\n', ""),
+  },
+  {
+    name: "a retirement with no reason",
+    file: "rulesetYaml",
+    code: "retirement-without-reason",
+    mutate: (yaml) => yaml.replace(/ {8}reason: >-\n(?: {10}.*\n)+/, ""),
+  },
+  {
+    name: "a retirement of something the snapshot never published",
+    file: "rulesetYaml",
+    code: "retirement-not-published",
+    mutate: (yaml) =>
+      yaml.replace(
+        '      - id: "content-signals.syntax"',
+        '      - id: "content-signals.invented"',
+      ),
+  },
+  {
+    // The superset check. A snapshot requirement the ruleset neither declares
+    // nor retires has been silently dropped, which is the thing ADR-0008
+    // section 2 exists to prevent.
+    name: "a snapshot assertion missing from the ruleset with no retirement",
+    file: "rulesetYaml",
+    code: "dropped-requirement",
+    mutate: (yaml) =>
+      yaml.replace(
+        '        - id: "robots.not-authz"',
+        '        - id: "robots.not-authz-renamed"',
+      ),
+  },
+  {
+    name: "a duplicate parameter name within one assertion",
+    file: "rulesetYaml",
+    code: "duplicate-parameter-name",
+    mutate: (yaml) =>
+      yaml.replace(
+        '            - name: "recognized-token-count"\n              kind: "count"\n              required: true\n',
+        '            - name: "recognized-token-count"\n              kind: "count"\n              required: true\n' +
+          '            - name: "recognized-token-count"\n              kind: "token"\n              required: false\n',
+      ),
+  },
+  {
+    name: "an excerpt parameter the assertion is not authorized to carry",
+    file: "rulesetYaml",
+    code: "unauthorized-excerpt",
+    mutate: (yaml) =>
+      yaml.replace(
+        '              kind: "count"',
+        '              kind: "excerpt"',
+      ),
+  },
+  {
+    name: "an assertion that cites nothing and records no todo",
+    file: "rulesetYaml",
+    code: "uncited-assertion",
+    mutate: (yaml) =>
+      yaml.replace(
+        '          source_refs: []\n          params: []\n          excerpt_authorized: false\n          todo:\n            - "source_refs unassigned; see the ruleset todo"\n            - "params unassigned; see the ruleset todo"\n',
+        "          source_refs: []\n          params: []\n          excerpt_authorized: false\n",
+      ),
+  },
+  {
+    name: "a compat pass heuristic on a ruleset rule",
+    file: "rulesetYaml",
+    code: "forbidden-ruleset-field",
+    mutate: (yaml) =>
+      yaml.replace(
+        '    spec:\n      claim_scope: "normative-conformance"',
+        '    compat:\n      pass_heuristic: "invented"\n    spec:\n      claim_scope: "normative-conformance"',
+      ),
+  },
+  {
+    name: "a ruleset drawing sources from a ledger version that is not the ledger's",
+    file: "rulesetYaml",
+    code: "source-ledger-version-mismatch",
+    mutate: (yaml) =>
+      yaml.replace(
+        'source_ledger_version: "0.3.0"',
+        'source_ledger_version: "0.4.0"',
+      ),
+  },
 ];
 
-describe("mutations of the registry", () => {
-  it.each(MUTATIONS)("rejects $name with $code", async ({ code, mutate }) => {
-    const mutated = mutate(REGISTRY);
-    expect(mutated, "the mutation did not change anything").not.toBe(REGISTRY);
-    expect(codesOf(await validate(mutated))).toContain(code);
-  });
+describe("mutations of the three authorities", () => {
+  it.each(MUTATIONS)(
+    "rejects $name with $code",
+    async ({ file, code, mutate }) => {
+      const original =
+        file === "snapshotYaml"
+          ? SNAPSHOT
+          : file === "ledgerYaml"
+            ? LEDGER
+            : RULESET;
+      const mutated = mutate(original);
+      expect(mutated, "the mutation did not change anything").not.toBe(
+        original,
+      );
+      expect(codesOf(await validate({ [file]: mutated }))).toContain(code);
+    },
+  );
 
-  it("changes the digest when a verdict-bearing field changes", async () => {
-    const mutated = REGISTRY.replace(
-      'rule_version: "0.1.0"',
-      'rule_version: "0.2.0"',
+  it("changes the ruleset digest when a verdict-bearing field changes", async () => {
+    const mutated = RULESET.replace(
+      'implementation_status: "planned"',
+      'implementation_status: "experimental"',
     );
-    const result = await validateRegistry({
-      registryYaml: mutated,
-      schemaJson: SCHEMA,
-      committed: null,
-    });
-    expect(result.artifacts?.digest).not.toBe(COMMITTED_DIGEST.trim());
+    const result = await run({ rulesetYaml: mutated });
+    expect(result.artifacts?.ruleset.digest).not.toBe(RULESET_DIGEST.trim());
+    // And the snapshot's seal is untouched by a ruleset edit, which is the
+    // whole reason there are two digests.
+    expect(result.artifacts?.snapshot.digest).toBe(SNAPSHOT_DIGEST.trim());
   });
 
   it("leaves the digest alone when only prose changes", async () => {
-    // The whole reason the projection exists. `title` is required by the
-    // schema and appears in reports, but it cannot change a verdict.
-    const mutated = REGISTRY.replace(
+    // The whole reason the projections exist. `title` is required by both
+    // schemas and appears in reports, but it cannot change a verdict.
+    const mutated = RULESET.replace(
       'title: "robots.txt"',
       'title: "robots.txt (corrected)"',
     );
-    expect(mutated).not.toBe(REGISTRY);
-    const result = await validateRegistry({
-      registryYaml: mutated,
-      schemaJson: SCHEMA,
-      committed: null,
-    });
+    expect(mutated).not.toBe(RULESET);
+    const result = await run({ rulesetYaml: mutated });
     expect(result.issues).toStrictEqual([]);
-    expect(result.artifacts?.digest).toBe(COMMITTED_DIGEST.trim());
+    expect(result.artifacts?.ruleset.digest).toBe(RULESET_DIGEST.trim());
   });
 
-  it("reports a stale committed artifact", async () => {
+  it("reports a stale committed artifact for either file", async () => {
     const result = await validateRegistry({
-      registryYaml: REGISTRY,
-      schemaJson: SCHEMA,
+      snapshotYaml: SNAPSHOT,
+      snapshotSchemaJson: SNAPSHOT_SCHEMA,
+      ledgerYaml: LEDGER,
+      ledgerSchemaJson: LEDGER_SCHEMA,
+      rulesetYaml: RULESET,
+      rulesetSchemaJson: RULESET_SCHEMA,
       committed: {
-        canonicalJson: `${COMMITTED_CANONICAL} `,
-        digest:
-          "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        snapshot: {
+          canonicalJson: `${SNAPSHOT_CANONICAL} `,
+          digest:
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        },
+        ruleset: {
+          canonicalJson: `${RULESET_CANONICAL} `,
+          digest:
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        },
       },
     });
     expect(codesOf(result.issues)).toStrictEqual([
+      "stale-canonical-json",
+      "stale-digest",
       "stale-canonical-json",
       "stale-digest",
     ]);
@@ -410,11 +790,11 @@ describe("mutations of the registry", () => {
 
 describe("hostile and malformed input", () => {
   it("reports every problem in one run rather than stopping at the first", async () => {
-    const mutated = REGISTRY.replace(
+    const mutated = SNAPSHOT.replace(
       'rule_id: "web.discovery.sitemap"',
       'rule_id: "web.discovery.robots"',
     ).replace('id: "sitemap.xml"', 'id: "robots.location"');
-    const codes = codesOf(await validate(mutated));
+    const codes = codesOf(await validate({ snapshotYaml: mutated }));
     expect(codes).toContain("duplicate-rule-id");
     expect(codes).toContain("duplicate-requirement-id");
   });
@@ -427,27 +807,32 @@ describe("hostile and malformed input", () => {
       "d: [*c, *c, *c, *c, *c, *c, *c, *c, *c]",
       "",
     ].join("\n");
-    const issues = await validate(bomb);
-    expect(issues.length).toBeGreaterThan(0);
+    expect((await validate({ rulesetYaml: bomb })).length).toBeGreaterThan(0);
   });
 
-  it("rejects a registry that is not a mapping", async () => {
-    expect(codesOf(await validate("- just\n- a\n- list\n"))).toContain(
-      "not-a-mapping",
-    );
+  it("rejects a file that is not a mapping", async () => {
+    expect(
+      codesOf(await validate({ ledgerYaml: "- just\n- a\n- list\n" })),
+    ).toContain("not-a-mapping");
   });
 
   it("rejects an unreadable schema without crashing", async () => {
     const result = await validateRegistry({
-      registryYaml: REGISTRY,
-      schemaJson: "{ not json",
+      snapshotYaml: SNAPSHOT,
+      snapshotSchemaJson: "{ not json",
+      ledgerYaml: LEDGER,
+      ledgerSchemaJson: LEDGER_SCHEMA,
+      rulesetYaml: RULESET,
+      rulesetSchemaJson: RULESET_SCHEMA,
       committed: null,
     });
     expect(codesOf(result.issues)).toStrictEqual(["schema-unreadable"]);
   });
 
   it("reports schema violations and semantic issues together", async () => {
-    const codes = codesOf(await validate(withTwentyThirdCheck(REGISTRY)));
+    const codes = codesOf(
+      await validate({ snapshotYaml: withTwentyThirdCheck(SNAPSHOT) }),
+    );
     expect(codes).toContain("unexpected-check-count");
     expect(codes).toContain("schema-violation");
   });

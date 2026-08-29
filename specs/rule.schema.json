@@ -2,35 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:agentready-lab:schema:rule-registry:v0",
   "title": "AgentReady Lab rules registry v0",
-  "description": "Schema for a snapshot-pinned registry that separates external-tool compatibility, specification conformance, and interoperability checks.",
+  "description": "Schema for the frozen external compatibility snapshot: what IsItAgentReady published on snapshot.captured_at. ADR-0008 section 2 moved registry_version, ruleset_id, ruleset_version and sources out of this file; the source ledger is specs/sources.schema.json and the executable ruleset is specs/ruleset.schema.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
-    "registry_version",
-    "ruleset_id",
-    "ruleset_version",
     "snapshot",
     "modes",
     "status_model",
-    "sources",
     "checks"
   ],
   "properties": {
     "schema_version": {
       "const": "0"
-    },
-    "registry_version": {
-      "type": "string",
-      "pattern": "^0\\.[0-9]+\\.[0-9]+$"
-    },
-    "ruleset_id": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9-]*$"
-    },
-    "ruleset_version": {
-      "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
     },
     "snapshot": {
       "$ref": "#/$defs/snapshot"
@@ -87,13 +71,6 @@
           "type": "string",
           "minLength": 1
         }
-      }
-    },
-    "sources": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "#/$defs/source"
       }
     },
     "checks": {
@@ -158,79 +135,6 @@
         "description": {
           "type": "string",
           "minLength": 1
-        }
-      }
-    },
-    "source": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "title",
-        "url",
-        "kind",
-        "status",
-        "verified_at"
-      ],
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9._-]*$"
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1
-        },
-        "url": {
-          "type": "string",
-          "format": "uri"
-        },
-        "kind": {
-          "enum": [
-            "compatibility-contract",
-            "ietf-rfc",
-            "ietf-draft",
-            "openid-specification",
-            "industry-protocol",
-            "standards-organization",
-            "w3c-community-report",
-            "ecosystem-specification",
-            "vendor-convention",
-            "open-source-profile",
-            "open-proposal"
-          ]
-        },
-        "status": {
-          "enum": [
-            "compatibility-snapshot",
-            "internet-standard",
-            "proposed-standard",
-            "informational-rfc",
-            "final",
-            "active-draft",
-            "expired-draft",
-            "open-pr",
-            "proposal",
-            "beta",
-            "community-report",
-            "convention",
-            "living-specification"
-          ]
-        },
-        "version": {
-          "type": "string",
-          "minLength": 1
-        },
-        "verified_at": {
-          "type": "string",
-          "format": "date"
-        },
-        "notes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
         }
       }
     },

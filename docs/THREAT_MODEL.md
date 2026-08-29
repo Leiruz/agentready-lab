@@ -857,7 +857,10 @@ address restrictions.
 ## 26. Failure semantics
 
 Security failures must be typed and deterministic. Example transport reason
-codes include:
+codes include the following. This block is illustrative: the executable
+enumeration is ADR-0003's, which splits the internal `ObservationFailure` union
+across a transport, a parser, and an engine owner, gives every variant a phase,
+and projects it onto the 15 public error codes that reach a report.
 
 ```text
 invalid-url

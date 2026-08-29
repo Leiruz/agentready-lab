@@ -121,7 +121,12 @@ receive deterministic human and JSON reports. No public target can be scanned.
 - [ ] The `local-loopback` transport rejects redirects away from the exact supplied origin.
 - [ ] HTML and Markdown observations of the same URL never deduplicate.
 - [ ] Robots, AI crawler, and Content Signals rules share one robots observation.
-- [ ] Reordering promise completion does not change canonical JSON.
+- [ ] Dispatch order is plan order and latency does not move it: request N+1 is
+      not dispatched before request N settles, and canonical JSON is
+      byte-identical across per-response latency profiles.
+- [ ] Reversed and re-segmented chunk arrival does not change canonical JSON,
+      including a segmentation where the byte that crosses a whole-scan
+      threshold arrives alone as the final chunk.
 - [ ] Every assertion/finding code has a positive and negative test.
 - [ ] Complete response bodies, credentials, cookies, and raw exceptions are
       absent from reports.
@@ -131,6 +136,13 @@ receive deterministic human and JSON reports. No public target can be scanned.
       public connection.
 - [ ] Version `0.1.0` release criteria in `IMPLEMENTATION_SPEC.md` are satisfied
       before calling the CLI usable.
+
+The two dispatch criteria replace "Reordering promise completion does not change
+canonical JSON", which named a mechanism this design does not have. Under
+ADR-0005 a later observation is not dispatched until the earlier one has
+settled, and ADR-0002 makes rules synchronous, so there is no rule-facing
+promise to reorder. What that criterion reached for is now structural; latency
+and chunk segmentation are the free variables the tests permute instead.
 
 ### Release opportunity
 

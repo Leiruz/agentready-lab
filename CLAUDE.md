@@ -19,7 +19,10 @@ relevant parts of:
 - accepted decisions under `docs/decisions/`
 - `docs/IMPLEMENTATION_SPEC.md` — product and behavior contract
 - `docs/ARCHITECTURE.md` — package boundaries and dependency direction
-- `docs/STANDARDS_REGISTRY.md` and `specs/checks.v0.yaml` — source provenance
+- `docs/STANDARDS_REGISTRY.md` and `specs/README.md` - source provenance
+- `specs/ruleset.standard.v0.yaml`, `specs/sources.v0.yaml`, and
+  `specs/checks.v0.yaml` - the executable ruleset, the source ledger, and the
+  frozen external snapshot (ADR-0008)
 - `docs/TEST_STRATEGY.md` — required verification layers
 - `docs/ROADMAP.md` — milestone order and acceptance criteria
 
@@ -118,8 +121,15 @@ not access public DNS, public websites, external scanners, or the current date.
 
 - Official pinned normative sources outrank scanner behavior, blogs, tutorials,
   search summaries, and model memory.
-- `specs/checks.v0.yaml` is the machine-readable source snapshot; do not invent
-  fields or behavior not supported by its schema and cited sources.
+- `specs/ruleset.standard.v0.yaml` is the executable ruleset and the authority
+  for what a rule asserts, its `implementation_status`, and each assertion's
+  `source_refs` and parameters. `specs/sources.v0.yaml` is the independent
+  source ledger every `source_refs` identifier resolves against. Do not invent
+  fields or behavior not supported by their schemas and cited sources.
+- `specs/checks.v0.yaml` is the frozen external compatibility snapshot
+  (ADR-0008). It is never read at scan time. Never edit it: adding a check, a
+  source, or a requirement to it is forbidden. Its per-check `rule_version` is
+  external snapshot metadata, never the native rule version and never reported.
 - Use namespaced `rule_id` values for native APIs and reports. Preserve the
   separate camelCase `id` only for the dated external compatibility mapping.
 - Every assertion needs an exact source version/date and section or pointer.

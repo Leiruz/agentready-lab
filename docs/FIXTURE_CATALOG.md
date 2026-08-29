@@ -41,12 +41,38 @@ fail when an unrelated assertion changes relative to the base.
 
 ### 2.2 Host model
 
-Local and Workers tests use a hostname derived from the fixture ID, for example:
+The harness starts one server per fixture case, binds it to `127.0.0.1:0`, reads
+the port the operating system assigned, and hands the scanner
+`http://127.0.0.1:<port>`. An IPv4 literal is not resolved at all, so this needs
+no resolver override, no hosts file, and no special-use domain, and the
+requirement that every resolved answer be loopback is satisfied trivially.
+`[::1]` gets the same treatment on its own ephemeral port for the IPv6 security
+case. Binding to `0.0.0.0` or `::` is forbidden: it would expose fixture cases,
+including deliberately malformed responses and redirect chains, to the local
+network and to any other tenant on a shared CI runner.
+
+This section once gave the scanner a hostname derived from the fixture ID.
+ADR-0006 retains that name as a manifest label only, `manifestHost`:
 
 ```text
 md-003.fixture.test
 api-004.fixture.test
 ```
+
+It is used for uniqueness checking across cases and for routing if the optional
+Workers deployment is ever configured under a domain the maintainer owns. It is
+never given to a transport, never used to construct a scan target, and never
+appears in a canonical report. A test that passes `manifestHost` to the scanner
+is a bug, and the harness asserts that the value it hands the scanner parses as
+an IP-literal origin.
+
+An ephemeral port appears in `target.requestedUrl`, `target.origin`,
+`policy.allowedPorts`, and every evidence request URL, so two runs of one case
+produce different canonical bytes. This is handled by injection, not by
+normalizing the origin away: the harness builds the expected report from the
+manifest and the origin it just bound, then compares byte for byte. Everything
+except the port stays an exact comparison and no regular expression is applied
+to the report.
 
 If public fixtures are later deployed, the maintainer replaces illustrative
 domains with a domain they control and may route
@@ -205,22 +231,50 @@ that a crawler will obey the published policy.
 
 Primary rule: `web.policy.content-signals`
 
-The exact grammar and token set are pinned in the standards registry before
-implementation. Results describe publisher declarations, not legal
+No grammar is invented for this rule. This section previously said the exact
+grammar and token set would be pinned in the standards registry before
+implementation; ADR-0009 establishes that no pinned source defines either. The
+three recognized tokens, `ai-train`, `search`, and `ai-input`, come from a dated
+external pass heuristic, so they are the vocabulary of the `compat` assertion
+and of nothing else. Results describe publisher declarations, not legal
 enforceability.
+
+No case here expects `spec: fail`, because there is no normative requirement
+left to violate. RFC 9309 section 2.2.4 defines no syntax for an extension
+record, explicitly permits a crawler to be lenient with one, and addresses its
+only `MUST` to the crawler rather than to the publisher.
+`content-signals.syntax` is therefore retired outright rather than demoted or
+renamed, and the non-interference obligation it seemed to carry is this
+project's own: the robots parser must produce identical group selection and
+allow/disallow results with extension records present and stripped, proven by a
+parser unit test rather than reported as a verdict about a target.
 
 | ID | Behavior | Expected result | Primary purpose |
 | --- | --- | --- | --- |
 | `sig-001` | A valid directive declares recognized values for `search`, `ai-input`, and `ai-train`. | `spec: pass`, `compat: pass` | Complete valid declaration |
-| `sig-002` | A syntactically valid directive declares only one recognized token permitted by the pinned snapshot. | `spec: pass`; undeclared tokens reported as unspecified | Partial declaration semantics |
-| `sig-003` | A recognized token uses a value outside the pinned grammar. | `spec: fail` | Invalid value rejection |
+| `sig-002` | A syntactically valid directive declares only one recognized token permitted by the dated snapshot. | `spec: pass` with the undeclared dimensions reported, `compat: pass` | Partial declaration semantics |
+| `sig-003` | A syntactically valid RFC 9309 record declares only tokens outside the dated compatibility set, with no recognized token present. | `spec: warning` on `content-signals.unrecognized-vocabulary`, `compat: fail` | The compatibility heuristic decides a compatibility verdict and nothing else |
 | `sig-004` | The same token is declared twice with conflicting values and the pinned source does not define conflict resolution. | `spec: warning` with `content-signals.conflicting-declaration` | Report ambiguity without inventing a normative failure |
-| `sig-005` | A valid known token appears beside an unknown extension token. | `spec: warning`; the known declaration remains usable and the extension is reported as unrecognized | Forward-compatible parsing without inventing extension semantics |
+| `sig-005` | A valid known token appears beside an unknown extension token. | `spec: warning` on `content-signals.unrecognized-vocabulary`, `compat: pass`; the known declaration remains usable | Forward-compatible parsing without inventing extension semantics |
 | `sig-006` | No Content Signals declaration exists. | `spec: not-applicable`, `compat: fail` where the dated readiness profile requires one | Optional deployment versus compatibility heuristic |
 
+`sig-003` and `sig-005` report the same `spec` assertion, which is weaker
+discrimination than a per-case assertion and is stated here rather than hidden.
+They stay distinct cases: their `compat` verdicts are opposite, and the
+finding's recognized-token-count parameter is zero in one and non-zero in the
+other. Whether any part of the declaration is usable is exactly what that
+parameter carries.
+
+No assertion in this rule produces a verdict about a token's value. Declared
+values are recorded verbatim as bounded sanitized evidence and reported as
+unspecified by the pinned source. A future contributor may not add an allowed
+value set because the community site's examples happen to use one; that requires
+a pinned source and a new decision.
+
 `sig-004` records an interoperability warning unless a later pinned source
-defines normative conflict handling. A later normative change requires a new
-ruleset rather than silently changing this fixture.
+defines normative conflict handling, and its assertion is created by ADR-0008. A
+later normative change requires a new ruleset rather than silently changing this
+fixture.
 
 ## 11. API Catalog — 6 cases
 

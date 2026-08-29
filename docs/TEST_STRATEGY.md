@@ -189,12 +189,33 @@ The engine suite must verify:
 ### Scheduling and memoization
 
 - rule evaluation follows registry order;
-- result order is unchanged when observations resolve in a different order;
+- a second observation is never dispatched before the previous one settles, for
+  settlements of every kind: a response, a transport error, a denied
+  reservation, and a timeout;
+- replaying one plan under several per-response latency profiles, including one
+  that is the reverse of another, produces byte-identical canonical JSON;
+- delivering each body in several segmentations, including one where the byte
+  that crosses a whole-scan threshold arrives alone as the final chunk and one
+  where it arrives inside the first chunk, produces byte-identical canonical
+  JSON;
+- a whole-scan byte budget crossed partway through the plan fails the same
+  observation under every segmentation, and a denied reservation opens no
+  socket;
 - identical probes deduplicate across rules;
-- probes differing by `Accept`, redirect policy, body limit, or network profile do not
-  deduplicate;
+- probes differing by `Accept`, redirect policy, maximum redirect count,
+  `maxEncodedBytes`, `maxDecodedBytes`, or network scope do not deduplicate;
 - a failed memo loader cannot poison a later scan;
 - a whole-scan request budget cannot be exceeded.
+
+This list once required that "result order is unchanged when observations
+resolve in a different order". ADR-0005 section 7 withdrew it as unreachable:
+under a strictly serial dispatcher a later observation cannot settle before it
+is dispatched, and rules are synchronous, so there is no rule-facing promise to
+reorder. Completion order is fixed by the dispatcher, which leaves latency and
+chunk segmentation as the free variables, and those are what the bullets above
+permute. The deduplication bullet named a singular "body limit"; both byte
+limits are in the canonical request key (ADR-0005 section 3) because two
+requests differing only in one of them are two different safety postures.
 
 ### Error normalization
 
@@ -209,10 +230,17 @@ The engine suite must verify:
 ### Canonicalization
 
 - arrays and header names are in canonical order;
-- evidence IDs are stable for the same sanitized observation;
+- evidence IDs are `ev-001` upward in plan order, and are stable for the same
+  plan rather than for the same sanitized observation;
+- adding a rule shifts the IDs of everything planned after it, and `report diff`
+  does not report that shift as a change;
 - random IDs, timestamps, durations, and completion order are absent;
 - repeated serialization is byte-for-byte identical;
 - reporters cannot mutate the frozen report.
+
+ADR-0005 section 5 replaced content-hash evidence IDs with the plan-order
+sequence, so stability for the same plan is the property determinism requires
+here. The content digest keeps living in `bodySha256`.
 
 ## 8. Reporter tests
 

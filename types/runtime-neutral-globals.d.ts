@@ -1,7 +1,14 @@
-// Ambient globals that `packages/core` and `packages/rules-standard` are
-// allowed to use.
+// Ambient globals that `packages/core` is allowed to use.
 //
-// Those two packages compile with `"lib": ["ES2023"]` and `"types": []`, which
+// `packages/rules-standard` deliberately does NOT include this file. ADR-0002
+// requires a compile-time guarantee that `AbortSignal`, `URL`, `fetch` and
+// `process` are unresolvable in the rule package, and rules never construct a
+// URL: they call `context.resolve()`, which core implements. `URL` is a pure
+// parser with no I/O, no clock and no randomness, so core may hold it without
+// weakening the invariant, but granting it to rules would weaken exactly the
+// assertion that matters.
+//
+// Both packages compile with `"lib": ["ES2023"]` and `"types": []`, which
 // is what makes `fetch`, `process`, `require`, `setTimeout`, `Buffer` and
 // `window` undeclared identifiers there (docs/ARCHITECTURE.md section 4). That
 // leaves no declaration for `URL`, which is not part of any ES lib but is a

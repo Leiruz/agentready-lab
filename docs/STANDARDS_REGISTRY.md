@@ -1,8 +1,11 @@
 # Standards Registry
 
 - Status: Proposed source-of-truth audit
-- Registry schema: `specs/rule.schema.json`
-- Machine-readable registry: `specs/checks.v0.yaml`
+- Executable ruleset: `specs/ruleset.standard.v0.yaml`
+- Source ledger: `specs/sources.v0.yaml`
+- Frozen external snapshot: `specs/checks.v0.yaml`
+- Registry schemas: `specs/ruleset.schema.json`, `specs/sources.schema.json`,
+  `specs/rule.schema.json`
 - Compatibility snapshot: 2026-08-28
 - Snapshot source: <https://isitagentready.com/llms-full.txt>
 
@@ -12,7 +15,17 @@ AgentReady Lab tests observable web behavior. It does not define the protocols
 it tests, certify implementations, or treat a commercial scanner's score as a
 standard.
 
-The initial registry begins with the 22 checks described in IsItAgentReady's
+The registry is three files, not one (ADR-0008).
+`specs/ruleset.standard.v0.yaml` is the executable ruleset a scan reads,
+carrying each rule's `implementation_status`, its assertions' `source_refs` and
+parameter schemas, and any `retired_requirements`. `specs/sources.v0.yaml` is
+the independently versioned source ledger that every `source_refs` identifier
+resolves against. `specs/checks.v0.yaml` is the frozen external compatibility
+snapshot: it is never read at scan time, it is never edited, and its per-check
+`rule_version` is snapshot metadata rather than this project's rule version.
+`specs/README.md` carries the full contract and the joins between the three.
+
+The frozen snapshot records the 22 checks described in IsItAgentReady's
 published full documentation on 2026-08-28. That inventory is useful as a
 compatibility target because Cloudflare exposes it publicly and uses related
 checks in URL Scanner. Its pass criteria are still product heuristics. RFCs,
@@ -300,7 +313,7 @@ For each change:
 7. never fetch moving standards sources during ordinary unit or CI tests;
 8. obtain independent review for normative assertion changes.
 
-The machine-readable registry is authoritative for implementation metadata. This
-document explains its rationale. If they disagree, block release until both are
-reviewed and corrected; do not silently choose whichever produces a higher
-score.
+`specs/ruleset.standard.v0.yaml` and `specs/sources.v0.yaml` are authoritative
+for implementation metadata. This document explains their rationale. If they
+disagree, block release until both are reviewed and corrected; do not silently
+choose whichever produces a higher score.

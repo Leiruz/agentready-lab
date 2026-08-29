@@ -19,7 +19,9 @@ deploy, publish, release, merge, or open a pull request.
 - Read `docs/ROADMAP.md`, `docs/IMPLEMENTATION_SPEC.md`,
   `docs/ARCHITECTURE.md`, `docs/TEST_STRATEGY.md`, the relevant sections of
   `docs/STANDARDS_REGISTRY.md` and `docs/FIXTURE_CATALOG.md`,
-  `specs/checks.v0.yaml`, and applicable decisions.
+  `specs/README.md` with the three registry files it describes
+  (`specs/ruleset.standard.v0.yaml`, `specs/sources.v0.yaml`, and the frozen
+  `specs/checks.v0.yaml`), and applicable decisions.
 - Inspect existing rule, parser, fixture, and test patterns.
 - If the requested package or command is still only planned, say so and scope
   work to the current milestone rather than pretending it exists.
@@ -77,10 +79,18 @@ Implement in `packages/rules-standard` using only public `packages/core`
 observation interfaces and shared parsers. Do not call network, DNS, filesystem,
 environment, clocks, or randomness directly. Never add fixture-specific logic.
 
-Update `specs/checks.v0.yaml`, generated registry documentation, schemas, and
-changelog only when verified source facts require them. Do not silently change
-an existing native `rule_id`, external compatibility `id`, finding code,
-`rule_version`, ruleset meaning, or public report shape.
+Update `specs/ruleset.standard.v0.yaml` for the rule and its assertions,
+`specs/sources.v0.yaml` for every source those assertions cite, and the
+generated registry artifacts, documentation, schemas, and changelog that
+follow from them, only when verified source facts require it.
+
+Never edit `specs/checks.v0.yaml`. It is the frozen external compatibility
+snapshot: adding a check, a source, or a requirement to it is forbidden
+(ADR-0008), and a native rule with no external counterpart has no entry in it
+at all.
+
+Do not silently change an existing native `rule_id`, external compatibility
+`id`, finding code, `rule_version`, ruleset meaning, or public report shape.
 
 ## 6. Verify and hand off
 

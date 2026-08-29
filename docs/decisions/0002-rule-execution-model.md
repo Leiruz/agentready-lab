@@ -1198,7 +1198,17 @@ first plugin proposal would have inherited a boundary that never existed.
 ### Implementation constraints
 
 - The rule package pins `lib: ["ES2023"], types: []` and a compile test asserts
-  that `AbortSignal`, `URL`, `fetch`, and `process` are unresolvable there.
+  that `AbortSignal`, `URL`, `fetch`, and `process` are unresolvable there. The
+  test asserts the diagnostic message contains `Cannot find name`, and pins the
+  exact code per identifier, rather than requiring TS2304 for all four. An
+  earlier revision of this constraint said TS2304, which is unachievable: the
+  compiler reports TS2591 for `process`, because it prefers that variant for a
+  known Node global once a `types` field is present. The property the constraint
+  exists to protect is that the name does not resolve, and both codes prove it.
+- `packages/core` is the only runtime-neutral package permitted the ambient
+  declarations in `types/runtime-neutral-globals.d.ts`. Rules never construct a
+  URL, they call `context.resolve()`, so granting `URL` to the rule package
+  would weaken exactly the assertion above while buying nothing.
 - ADR-0007 says remediation is keyed by finding code, "which ADR-0002 makes
   identical to a registry requirement `id`". After section 9 that is true only
   of `spec`-mode codes, and remediation coverage must extend to compatibility

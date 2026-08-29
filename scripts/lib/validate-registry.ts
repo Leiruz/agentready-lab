@@ -8,7 +8,15 @@ import {
 } from "../../packages/core/src/schema/sha256.js";
 
 /**
- * The `specs/checks.v0.yaml` validator, as a pure function.
+ * The `specs/` validator, as a pure function.
+ *
+ * ADR-0008 replaces one file doing three jobs with three authorities, so this
+ * validates all three and the joins between them:
+ *
+ * - `specs/checks.v0.yaml` is the frozen external compatibility snapshot;
+ * - `specs/sources.v0.yaml` is the independent source ledger, and every
+ *   `source_refs` identifier in either other file resolves against it;
+ * - `specs/ruleset.standard.v0.yaml` is the executable native ruleset.
  *
  * `specs/README.md` "Validation" is the requirement list this implements. It
  * is a pure function over text so that it has exactly two callers and no third
@@ -20,8 +28,16 @@ import {
  * Taking text rather than paths is also what makes "no network" structural
  * rather than a promise. This function has no transport, no filesystem, and no
  * clock. A source URL is parsed and classified; it is never dereferenced. The
- * "today" that the date checks compare against is `snapshot.captured_at` from
- * the registry itself, so the result does not change overnight.
+ * "today" that a date check compares against is declared in the file that owns
+ * the date, so the result does not change overnight.
+ *
+ * There are two such declared ceilings, not one, because ADR-0008 section 1
+ * versions the ledger independently "because a source's verification date
+ * changes for reasons that have nothing to do with" the snapshot. A snapshot
+ * date is bounded by `snapshot.captured_at`; a ledger `verified_at` is bounded
+ * by `ledger_date`. Bounding the ledger by the snapshot's capture date made it
+ * impossible to record a source verified after the snapshot was taken, which
+ * is the opposite of two artifacts on two clocks.
  */
 
 // ---------------------------------------------------------------------------
@@ -32,7 +48,8 @@ import {
  * `specs/README.md`: "exactly 22 compatibility checks are present". Asserted
  * here as well as in the schema, because `minItems`/`maxItems` are one edit
  * away from being relaxed and this file is where the requirement is written
- * down.
+ * down. ADR-0008 makes this a fact about what IsItAgentReady published on the
+ * snapshot date, never this project's rule count.
  */
 const REQUIRED_CHECK_COUNT = 22;
 
@@ -47,6 +64,19 @@ const REQUIRED_CHECK_COUNT = 22;
  */
 const HTTP_SOURCE_ID_ALLOWLIST: readonly string[] = [];
 
+const SNAPSHOT_FILE = "specs/checks.v0.yaml";
+const LEDGER_FILE = "specs/sources.v0.yaml";
+const RULESET_FILE = "specs/ruleset.standard.v0.yaml";
+
+/**
+ * Keys ADR-0008 section 2 forbids on a ruleset rule entry. `compat` is a dated
+ * observation about an external tool and `ordinal` and `id` are that tool's
+ * identifiers; a native rule with no external counterpart has none of them.
+ * `additionalProperties: false` already rejects all three, and this list is
+ * kept anyway because the ADR names the check and a schema is one edit away.
+ */
+const FORBIDDEN_RULE_KEYS: readonly string[] = ["compat", "ordinal", "id"];
+
 // ---------------------------------------------------------------------------
 // Public shape
 // ---------------------------------------------------------------------------
@@ -54,10 +84,10 @@ const HTTP_SOURCE_ID_ALLOWLIST: readonly string[] = [];
 /**
  * One validation failure.
  *
- * `code` is stable and machine-readable. `location` is a JSON Pointer (RFC
- * 6901) into the parsed registry, except for the two cases where no parsed
- * document exists yet: a YAML error carries `line L:C`, and a staleness or
- * artifact issue carries the repository-relative path of the file it is about.
+ * `code` is stable and machine-readable. `location` is the repository-relative
+ * file name, followed by a JSON Pointer (RFC 6901) into that parsed document
+ * where one exists. A YAML error carries `line L:C` instead, because no parsed
+ * document exists yet.
  */
 export interface RegistryIssue {
   readonly code: string;
@@ -65,17 +95,48 @@ export interface RegistryIssue {
   readonly message: string;
 }
 
-/** The generated artifacts that `pnpm specs:canonicalise` writes. */
-export interface CanonicalArtifacts {
-  /** The exact bytes of `specs/checks.v0.canonical.json`, with no trailing newline. */
+/**
+ * One listed delta or open item. Reported, never fatal.
+ *
+ * ADR-0008 sections 2 and 5 require the snapshot-to-ruleset differences to be
+ * printed rather than rejected: the snapshot's per-check `rule_version` is
+ * frozen metadata that may lag the ruleset by any distance, and an assertion
+ * the ruleset adds or retires is a decision, not a defect. A `todo` recorded
+ * in the data is carried here for the same reason.
+ */
+export type RegistryNote = RegistryIssue;
+
+/** One generated artifact pair. */
+export interface DigestPair {
+  /** The exact bytes of the canonical JSON file, with no trailing newline. */
   readonly canonicalJson: string;
-  /** The `sha256:<hex>` line of `specs/checks.v0.digest.txt`. */
+  /** The `sha256:<hex>` line of the digest file. */
   readonly digest: string;
 }
 
+/**
+ * The generated artifacts that `pnpm specs:canonicalise` writes.
+ *
+ * There are two, and the split is the point. ADR-0008 makes the ruleset the
+ * executable authority and says the snapshot "is never read at scan time", so
+ * a digest over the snapshot can no longer identify what produced a verdict.
+ * `ruleset` is the digest a report carries; `snapshot` is the seal that proves
+ * the frozen file was not edited. The source ledger has no digest: ADR-0007
+ * puts `sourceLedgerVersion` in the report, and a version a human increments
+ * is what a citation needs to be reproducible.
+ */
+export interface CanonicalArtifacts {
+  readonly snapshot: DigestPair;
+  readonly ruleset: DigestPair;
+}
+
 export interface RegistryValidationInput {
-  readonly registryYaml: string;
-  readonly schemaJson: string;
+  readonly snapshotYaml: string;
+  readonly snapshotSchemaJson: string;
+  readonly ledgerYaml: string;
+  readonly ledgerSchemaJson: string;
+  readonly rulesetYaml: string;
+  readonly rulesetSchemaJson: string;
   /**
    * The committed generated artifacts, when they should be checked for
    * currency. `null` skips the currency check, which is what
@@ -86,7 +147,8 @@ export interface RegistryValidationInput {
 
 export interface RegistryValidationResult {
   readonly issues: readonly RegistryIssue[];
-  /** `null` when the registry could not be projected far enough to canonicalize. */
+  readonly notes: readonly RegistryNote[];
+  /** `null` when a document could not be projected far enough to canonicalize. */
   readonly artifacts: CanonicalArtifacts | null;
 }
 
@@ -114,9 +176,9 @@ function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-/** RFC 6901 section 3. */
-function pointer(...tokens: readonly (string | number)[]): string {
-  return tokens
+/** RFC 6901 section 3, prefixed with the file the pointer is into. */
+function at(file: string, ...tokens: readonly (string | number)[]): string {
+  const path = tokens
     .map((token) =>
       typeof token === "number"
         ? String(token)
@@ -124,6 +186,7 @@ function pointer(...tokens: readonly (string | number)[]): string {
     )
     .map((token) => `/${token}`)
     .join("");
+  return path === "" ? file : `${file}#${path}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +223,12 @@ function isRealCalendarDate(text: string): boolean {
 
 interface DateCheckContext {
   readonly issues: RegistryIssue[];
-  /** `snapshot.captured_at`, or `null` when it is itself unusable. */
-  readonly snapshotDate: string | null;
+  /**
+   * The declared ceiling this file's dates may not exceed, or `null` when the
+   * date being checked is the ceiling itself and comparing it would be a
+   * tautology. Named so the message says which clock rejected the date.
+   */
+  readonly ceiling: { readonly label: string; readonly value: string } | null;
 }
 
 /**
@@ -200,11 +267,11 @@ function checkDate(
   // ISO 8601 extended dates sort correctly as strings, so no clock is needed
   // and none is wanted: a test whose result depends on the day it runs is not
   // a test (docs/TEST_STRATEGY.md section 2.1).
-  if (context.snapshotDate !== null && text > context.snapshotDate) {
+  if (context.ceiling !== null && text > context.ceiling.value) {
     context.issues.push({
       code: "future-date",
       location,
-      message: `"${text}" is after the snapshot date ${context.snapshotDate}`,
+      message: `"${text}" is after the ${context.ceiling.label} ${context.ceiling.value}`,
     });
   }
 }
@@ -249,8 +316,13 @@ function checkUrl(
 // Uniqueness
 // ---------------------------------------------------------------------------
 
+interface Entry {
+  readonly value: string;
+  readonly location: string;
+}
+
 function checkUnique(
-  entries: readonly { readonly value: string; readonly location: string }[],
+  entries: readonly Entry[],
   code: string,
   what: string,
   issues: RegistryIssue[],
@@ -271,38 +343,131 @@ function checkUnique(
 }
 
 // ---------------------------------------------------------------------------
-// The verdict-bearing projection
+// Document loading
 // ---------------------------------------------------------------------------
 
+interface LoadedDocument {
+  readonly root: Record<string, unknown> | null;
+  readonly fatal: boolean;
+}
+
 /**
- * The subset of the registry that the ruleset digest covers.
- *
- * `docs/IMPLEMENTATION_SPEC.md` section 13 requires a report to carry a
- * ruleset digest, and ADR-0008 makes the registry's identity separate from its
- * prose. So the digest covers what can change a verdict and nothing else:
- * `ruleset_id`, `ruleset_version`, and per check `rule_id`, `rule_version`,
- * `runtime`, `profiles`, `applicability`, `source_refs`, and
- * `spec.requirements`.
- *
- * Deliberately excluded: `title`, `compat` (a dated observation about someone
- * else's tool, not an assertion this project makes), `spec.deltas`,
- * `interop.caveats`, every source's `notes` and `verified_at`, and the whole
- * `sources` block. Fixing a typo in a caveat must not invalidate every pinned
- * report, or nobody will fix typos.
- *
- * Two things the brief's summary of this list asks for are not here, and both
- * absences are deliberate:
- *
- * - a per-check `modes` field. `specs/rule.schema.json` defines no such
- *   property. Every check carries `compat`, `spec` and `interop` blocks, so a
- *   "modes" list could only be derived, and `.claude/rules/standards.md`
- *   forbids inventing a field the schema does not support. If the registry
- *   gains one, it belongs in this projection.
- * - array sorting. Element order is preserved exactly as the file has it.
- *   Sorting `profiles`, `runtime` or `source_refs` would make the digest
- *   ignore a cosmetic reorder, which is attractive, but it is a policy
- *   decision about set-valued fields that no accepted decision has made yet.
+ * Parses one document with duplicate-key rejection, bounds alias expansion,
+ * and validates it against its schema. Every failure becomes an issue; nothing
+ * throws, because this function's contract is that it reports problems and a
+ * caller that has to catch for one input class will forget.
  */
+function load(
+  yamlText: string,
+  schemaJson: string,
+  file: string,
+  issues: RegistryIssue[],
+): LoadedDocument {
+  // `uniqueKeys` is passed explicitly even though it already defaults to true.
+  // A default that satisfies a security requirement should be written at the
+  // place the requirement is enforced, or the requirement survives only as
+  // long as nobody upstream changes their mind. `prettyErrors` adds the
+  // line/column pointer that makes a long file navigable.
+  const document = parseDocument(yamlText, {
+    uniqueKeys: true,
+    prettyErrors: true,
+  });
+
+  // Warnings are fatal as well as errors. `yaml` reports things like an
+  // unsupported tag as a warning, and a file the parser did not fully
+  // understand is not one this project may act on.
+  let parseFailed = false;
+  for (const problem of [...document.errors, ...document.warnings]) {
+    parseFailed = true;
+    const line = problem.linePos?.[0];
+    issues.push({
+      code:
+        problem.name === "YAMLWarning" ? "yaml-warning" : "yaml-parse-error",
+      location:
+        line === undefined
+          ? file
+          : `${file}#line ${String(line.line)}:${String(line.col)}`,
+      message: `${problem.code}: ${problem.message}`,
+    });
+  }
+  // A tree the parser rejected cannot be meaningfully schema-checked, and
+  // every downstream message would be noise about the same defect.
+  if (parseFailed) return { root: null, fatal: true };
+
+  // `maxAliasCount` bounds YAML alias expansion, which is the billion laughs
+  // amplification vector. 100 is the library default, stated here for the same
+  // reason as `uniqueKeys`.
+  let data: unknown;
+  try {
+    data = document.toJS({ maxAliasCount: 100 });
+  } catch (error) {
+    issues.push({
+      code: "yaml-expansion-failed",
+      location: file,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { root: null, fatal: true };
+  }
+
+  let schema: unknown;
+  try {
+    schema = JSON.parse(schemaJson);
+  } catch (error) {
+    issues.push({
+      code: "schema-unreadable",
+      location: file,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return { root: null, fatal: true };
+  }
+
+  for (const violation of validateAgainstSchema(data, schema)) {
+    issues.push({
+      code: "schema-violation",
+      // `instanceLocation` is already a URI fragment, `#` and all.
+      location: `${file}${violation.instanceLocation}`,
+      message: `${violation.error} (${violation.keywordLocation})`,
+    });
+  }
+
+  const root = asRecord(data);
+  if (root === null) {
+    issues.push({
+      code: "not-a-mapping",
+      location: file,
+      message: `the root of ${file} is not a mapping`,
+    });
+    return { root: null, fatal: true };
+  }
+
+  return { root, fatal: false };
+}
+
+// ---------------------------------------------------------------------------
+// The verdict-bearing projections
+//
+// `docs/IMPLEMENTATION_SPEC.md` section 13 requires a report to carry a ruleset
+// digest, and ADR-0008 makes each artifact's identity separate. So each digest
+// covers what can change a verdict in its own file and nothing else. Fixing a
+// typo in a caveat must not invalidate every pinned report, or nobody will fix
+// typos.
+//
+// Two things are deliberately excluded from both, and both absences are
+// inherited from the pre-ADR-0008 projection rather than newly decided here:
+//
+// - a per-rule `modes` field. No schema defines one; a "modes" list could only
+//   be derived, and `.claude/rules/standards.md` forbids inventing a field the
+//   schema does not support.
+// - array sorting. Element order is preserved exactly as the file has it.
+//   Sorting `profiles`, `runtime` or `source_refs` would make the digest ignore
+//   a cosmetic reorder, which is attractive, but it is a policy decision about
+//   set-valued fields that no accepted decision has made yet.
+//
+// `interop` is excluded on the same precedent, and it is the weaker of the two
+// exclusions: `interop.disposition` gates whether an interop action runs at
+// all. It is named here so a later decision can move it in deliberately.
+// ---------------------------------------------------------------------------
+
 interface ProjectedCheck {
   readonly rule_id: string;
   readonly rule_version: string;
@@ -313,26 +478,27 @@ interface ProjectedCheck {
   readonly spec: { readonly requirements: readonly unknown[] };
 }
 
-interface ProjectedRuleset {
-  readonly ruleset_id: string;
-  readonly ruleset_version: string;
+interface ProjectedSnapshot {
+  /** The snapshot's identity, now that `ruleset_id` has migrated out. */
+  readonly captured_at: string;
   readonly checks: readonly ProjectedCheck[];
 }
 
-function project(
+function projectSnapshot(
   root: Record<string, unknown>,
   issues: RegistryIssue[],
-): ProjectedRuleset | null {
-  const rulesetId = asString(root["ruleset_id"]);
-  const rulesetVersion = asString(root["ruleset_version"]);
+): ProjectedSnapshot | null {
+  const snapshot = asRecord(root["snapshot"]);
+  const capturedAt =
+    snapshot === null ? null : asString(snapshot["captured_at"]);
   const checks = asArray(root["checks"]);
 
-  if (rulesetId === null || rulesetVersion === null || checks === null) {
+  if (capturedAt === null || checks === null) {
     issues.push({
       code: "projection-failed",
-      location: "",
+      location: SNAPSHOT_FILE,
       message:
-        "ruleset_id, ruleset_version and checks are required to build the canonical projection",
+        "snapshot.captured_at and checks are required to build the canonical projection",
     });
     return null;
   }
@@ -361,7 +527,7 @@ function project(
     ) {
       issues.push({
         code: "projection-failed",
-        location: pointer("checks", index),
+        location: at(SNAPSHOT_FILE, "checks", index),
         message:
           "check is missing a field the canonical projection covers, so no digest can be produced",
       });
@@ -379,174 +545,278 @@ function project(
     });
   }
 
+  return { captured_at: capturedAt, checks: projected };
+}
+
+interface ProjectedRule {
+  readonly rule_id: string;
+  readonly rule_version: string;
+  readonly implementation_status: string;
+  readonly runtime: readonly unknown[];
+  readonly profiles: readonly unknown[];
+  readonly applicability: Record<string, unknown>;
+  readonly source_refs: readonly unknown[];
+  readonly spec: {
+    readonly claim_scope: string;
+    readonly requirements: readonly unknown[];
+  };
+  readonly compat_assertions: readonly unknown[];
+  readonly retired_requirements: readonly unknown[];
+}
+
+interface ProjectedRuleset {
+  readonly ruleset_id: string;
+  readonly ruleset_version: string;
+  readonly source_ledger_version: string;
+  readonly rules: readonly ProjectedRule[];
+}
+
+function projectRuleset(
+  root: Record<string, unknown>,
+  issues: RegistryIssue[],
+): ProjectedRuleset | null {
+  const rulesetId = asString(root["ruleset_id"]);
+  const rulesetVersion = asString(root["ruleset_version"]);
+  const ledgerVersion = asString(root["source_ledger_version"]);
+  const rules = asArray(root["rules"]);
+
+  if (
+    rulesetId === null ||
+    rulesetVersion === null ||
+    ledgerVersion === null ||
+    rules === null
+  ) {
+    issues.push({
+      code: "projection-failed",
+      location: RULESET_FILE,
+      message:
+        "ruleset_id, ruleset_version, source_ledger_version and rules are required to build the canonical projection",
+    });
+    return null;
+  }
+
+  const projected: ProjectedRule[] = [];
+  for (const [index, raw] of rules.entries()) {
+    const rule = asRecord(raw);
+    const ruleId = rule === null ? null : asString(rule["rule_id"]);
+    const ruleVersion = rule === null ? null : asString(rule["rule_version"]);
+    const status =
+      rule === null ? null : asString(rule["implementation_status"]);
+    const runtime = rule === null ? null : asArray(rule["runtime"]);
+    const profiles = rule === null ? null : asArray(rule["profiles"]);
+    const applicability =
+      rule === null ? null : asRecord(rule["applicability"]);
+    const sourceRefs = rule === null ? null : asArray(rule["source_refs"]);
+    const spec = rule === null ? null : asRecord(rule["spec"]);
+    const claimScope = spec === null ? null : asString(spec["claim_scope"]);
+    const requirements = spec === null ? null : asArray(spec["requirements"]);
+
+    if (
+      rule === null ||
+      ruleId === null ||
+      ruleVersion === null ||
+      status === null ||
+      runtime === null ||
+      profiles === null ||
+      applicability === null ||
+      sourceRefs === null ||
+      claimScope === null ||
+      requirements === null
+    ) {
+      issues.push({
+        code: "projection-failed",
+        location: at(RULESET_FILE, "rules", index),
+        message:
+          "rule is missing a field the canonical projection covers, so no digest can be produced",
+      });
+      return null;
+    }
+
+    projected.push({
+      rule_id: ruleId,
+      rule_version: ruleVersion,
+      implementation_status: status,
+      runtime,
+      profiles,
+      applicability,
+      source_refs: sourceRefs,
+      spec: { claim_scope: claimScope, requirements },
+      compat_assertions: asArray(rule["compat_assertions"]) ?? [],
+      retired_requirements: asArray(rule["retired_requirements"]) ?? [],
+    });
+  }
+
   return {
     ruleset_id: rulesetId,
     ruleset_version: rulesetVersion,
-    checks: projected,
+    source_ledger_version: ledgerVersion,
+    rules: projected,
+  };
+}
+
+async function seal(
+  projection: unknown,
+  file: string,
+  issues: RegistryIssue[],
+): Promise<DigestPair | null> {
+  let canonicalJson: string;
+  try {
+    canonicalJson = canonicalizeJson(projection);
+  } catch (error) {
+    issues.push({
+      code: "canonicalization-failed",
+      location: file,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+  return {
+    canonicalJson,
+    digest: formatDigest(await sha256HexOfUtf8(canonicalJson)),
   };
 }
 
 // ---------------------------------------------------------------------------
-// The validator
+// Per-document semantic checks
 // ---------------------------------------------------------------------------
 
-export async function validateRegistry(
-  input: RegistryValidationInput,
-): Promise<RegistryValidationResult> {
-  const issues: RegistryIssue[] = [];
+interface Ledger {
+  readonly ids: ReadonlySet<string>;
+  readonly version: string | null;
+  /** Ledger index into `sources`, for the orphan report. */
+  readonly indexById: ReadonlyMap<string, number>;
+  /** Every identifier either other file cited, resolved or not. */
+  readonly referenced: Set<string>;
+}
 
-  // 1. Parse with duplicate-key rejection.
-  //
-  // `uniqueKeys` is passed explicitly even though it already defaults to true.
-  // A default that satisfies a security requirement should be written at the
-  // place the requirement is enforced, or the requirement survives only as
-  // long as nobody upstream changes their mind. `prettyErrors` adds the
-  // line/column pointer that makes a 1395-line file navigable.
-  const document = parseDocument(input.registryYaml, {
-    uniqueKeys: true,
-    prettyErrors: true,
-  });
-
-  // Warnings are fatal as well as errors. `yaml` reports things like an
-  // unsupported tag as a warning, and a registry the parser did not fully
-  // understand is not a registry this project may act on.
-  for (const problem of [...document.errors, ...document.warnings]) {
-    const line = problem.linePos?.[0];
-    issues.push({
-      code:
-        problem.name === "YAMLWarning" ? "yaml-warning" : "yaml-parse-error",
-      location:
-        line === undefined
-          ? ""
-          : `line ${String(line.line)}:${String(line.col)}`,
-      message: `${problem.code}: ${problem.message}`,
-    });
-  }
-  if (issues.length > 0) {
-    // A tree the parser rejected cannot be meaningfully schema-checked, and
-    // every downstream message would be noise about the same defect.
-    return { issues, artifacts: null };
-  }
-
-  // `maxAliasCount` bounds YAML alias expansion, which is the billion laughs
-  // amplification vector. 100 is the library default, stated here for the same
-  // reason as `uniqueKeys`. Crossing it throws rather than returning, so it is
-  // converted into an issue: this function's contract is that it reports
-  // problems, and a caller that has to catch for one input class will forget.
-  let data: unknown;
-  try {
-    data = document.toJS({ maxAliasCount: 100 });
-  } catch (error) {
-    issues.push({
-      code: "yaml-expansion-failed",
-      location: "",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return { issues, artifacts: null };
-  }
-
-  // 2. JSON Schema Draft 2020-12, short-circuit off.
-  let schema: unknown;
-  try {
-    schema = JSON.parse(input.schemaJson);
-  } catch (error) {
-    issues.push({
-      code: "schema-unreadable",
-      location: "",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return { issues, artifacts: null };
-  }
-
-  for (const violation of validateAgainstSchema(data, schema)) {
-    issues.push({
-      code: "schema-violation",
-      location: violation.instanceLocation,
-      message: `${violation.error} (${violation.keywordLocation})`,
-    });
-  }
-
-  const root = asRecord(data);
-  if (root === null) {
-    issues.push({
-      code: "not-a-mapping",
-      location: "",
-      message: "the registry root is not a mapping",
-    });
-    return { issues, artifacts: null };
-  }
-
-  // 3 and 4. Semantic constraints and the format assertions the schema makes
-  // only as annotations.
-  const snapshot = asRecord(root["snapshot"]);
-  const capturedAt =
-    snapshot === null ? null : asString(snapshot["captured_at"]);
-  const snapshotDate =
-    capturedAt !== null && isRealCalendarDate(capturedAt) ? capturedAt : null;
-  const dateContext: DateCheckContext = { issues, snapshotDate };
-
-  if (snapshot !== null) {
-    checkDate(snapshot["captured_at"], pointer("snapshot", "captured_at"), {
-      issues,
-      // The snapshot date cannot be in the future relative to itself; comparing
-      // it against itself would be a tautology, so only shape is checked here.
-      snapshotDate: null,
-    });
-    checkUrl(
-      snapshot["compatibility_source"],
-      pointer("snapshot", "compatibility_source"),
-      null,
-      issues,
-    );
-  }
-
+function checkLedger(
+  root: Record<string, unknown>,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): Ledger {
   const sources = asArray(root["sources"]) ?? [];
-  const sourceIds = new Set<string>();
-  const sourceIdEntries: { value: string; location: string }[] = [];
+  const ids = new Set<string>();
+  const indexById = new Map<string, number>();
+  const idEntries: Entry[] = [];
+
+  collectTodos(root, LEDGER_FILE, [], notes);
+
+  // The ledger's own declared clock. It is checked for shape against no
+  // ceiling, for the same reason `snapshot.captured_at` is: a value cannot be
+  // after itself.
+  const ledgerDateLocation = at(LEDGER_FILE, "ledger_date");
+  checkDate(root["ledger_date"], ledgerDateLocation, { issues, ceiling: null });
+  const declaredLedgerDate = asString(root["ledger_date"]);
+  const ledgerDate =
+    declaredLedgerDate !== null && isRealCalendarDate(declaredLedgerDate)
+      ? declaredLedgerDate
+      : null;
+  const dateContext: DateCheckContext = {
+    issues,
+    ceiling:
+      ledgerDate === null ? null : { label: "ledger date", value: ledgerDate },
+  };
+  let newestVerification: {
+    readonly date: string;
+    readonly id: string;
+  } | null = null;
 
   for (const [index, raw] of sources.entries()) {
     const source = asRecord(raw);
     if (source === null) continue;
     const id = asString(source["id"]);
     if (id !== null) {
-      sourceIds.add(id);
-      sourceIdEntries.push({
+      ids.add(id);
+      if (!indexById.has(id)) indexById.set(id, index);
+      idEntries.push({
         value: id,
-        location: pointer("sources", index, "id"),
+        location: at(LEDGER_FILE, "sources", index, "id"),
       });
     }
     checkDate(
       source["verified_at"],
-      pointer("sources", index, "verified_at"),
+      at(LEDGER_FILE, "sources", index, "verified_at"),
       dateContext,
     );
-    checkUrl(source["url"], pointer("sources", index, "url"), id, issues);
+    const verifiedAt = asString(source["verified_at"]);
+    if (
+      verifiedAt !== null &&
+      isRealCalendarDate(verifiedAt) &&
+      (newestVerification === null || verifiedAt > newestVerification.date)
+    ) {
+      newestVerification = { date: verifiedAt, id: id ?? String(index) };
+    }
+    checkUrl(
+      source["url"],
+      at(LEDGER_FILE, "sources", index, "url"),
+      id,
+      issues,
+    );
+    collectTodos(source, LEDGER_FILE, ["sources", index], notes);
   }
-  checkUnique(sourceIdEntries, "duplicate-source-id", "source id", issues);
 
+  checkUnique(idEntries, "duplicate-source-id", "source id", issues);
+
+  // The same inconsistency the per-entry check reports, named from the end a
+  // maintainer usually got wrong. A ceiling below the newest verification
+  // makes every entry above it look like the defect; this points at the one
+  // field that is actually stale. It is not an anti-laundering check and
+  // cannot be one: with no clock there is no upper bound on `ledger_date`.
+  // What keeps the ceiling honest is that raising it is a declared edit to a
+  // reviewed line rather than a silent widening.
+  if (
+    ledgerDate !== null &&
+    newestVerification !== null &&
+    newestVerification.date > ledgerDate
+  ) {
+    issues.push({
+      code: "ledger-date-before-verification",
+      location: ledgerDateLocation,
+      message: `ledger_date ${ledgerDate} is earlier than "${newestVerification.id}" verified_at ${newestVerification.date}`,
+    });
+  }
+
+  return {
+    ids,
+    version: asString(root["source_ledger_version"]),
+    indexById,
+    referenced: new Set<string>(),
+  };
+}
+
+/** One snapshot check, reduced to what the joins need. */
+interface SnapshotCheck {
+  readonly index: number;
+  readonly ruleVersion: string | null;
+  /** Requirement id to its text, in file order. */
+  readonly requirements: ReadonlyMap<string, string>;
+}
+
+function checkSnapshot(
+  root: Record<string, unknown>,
+  ledger: Ledger,
+  issues: RegistryIssue[],
+): ReadonlyMap<string, SnapshotCheck> {
   const checks = asArray(root["checks"]) ?? [];
+  const byRuleId = new Map<string, SnapshotCheck>();
 
-  // 5. Exactly 22 checks. ADR-0008 makes this a fact about what IsItAgentReady
-  // published on the snapshot date, not this project's rule count, so it is a
-  // hard equality and not a floor.
   if (checks.length !== REQUIRED_CHECK_COUNT) {
     issues.push({
       code: "unexpected-check-count",
-      location: pointer("checks"),
+      location: at(SNAPSHOT_FILE, "checks"),
       message: `expected exactly ${String(REQUIRED_CHECK_COUNT)} checks, found ${String(checks.length)}`,
     });
   }
 
-  const checkIdEntries: { value: string; location: string }[] = [];
-  const ruleIdEntries: { value: string; location: string }[] = [];
-  const ordinalEntries: { value: string; location: string }[] = [];
-  const requirementIdEntries: { value: string; location: string }[] = [];
+  const checkIdEntries: Entry[] = [];
+  const ruleIdEntries: Entry[] = [];
+  const ordinalEntries: Entry[] = [];
+  const requirementIdEntries: Entry[] = [];
   // Paired with the index of the check they came from, so that a check with a
   // missing or non-numeric ordinal (already a schema violation) cannot shift
   // every later pointer by one and send a maintainer to the wrong line.
   const ordinals: { readonly value: number; readonly checkIndex: number }[] =
     [];
-  const referencedSourceIds = new Set<string>();
 
   for (const [index, raw] of checks.entries()) {
     const check = asRecord(raw);
@@ -556,7 +826,7 @@ export async function validateRegistry(
     if (id !== null) {
       checkIdEntries.push({
         value: id,
-        location: pointer("checks", index, "id"),
+        location: at(SNAPSHOT_FILE, "checks", index, "id"),
       });
     }
 
@@ -564,7 +834,7 @@ export async function validateRegistry(
     if (ruleId !== null) {
       ruleIdEntries.push({
         value: ruleId,
-        location: pointer("checks", index, "rule_id"),
+        location: at(SNAPSHOT_FILE, "checks", index, "rule_id"),
       });
     }
 
@@ -573,37 +843,33 @@ export async function validateRegistry(
       ordinals.push({ value: ordinal, checkIndex: index });
       ordinalEntries.push({
         value: String(ordinal),
-        location: pointer("checks", index, "ordinal"),
+        location: at(SNAPSHOT_FILE, "checks", index, "ordinal"),
       });
     }
 
-    for (const [refIndex, rawRef] of (
-      asArray(check["source_refs"]) ?? []
-    ).entries()) {
-      const ref = asString(rawRef);
-      if (ref === null) continue;
-      referencedSourceIds.add(ref);
-      if (!sourceIds.has(ref)) {
-        issues.push({
-          code: "unresolved-source-ref",
-          location: pointer("checks", index, "source_refs", refIndex),
-          message: `source_refs entry "${ref}" resolves to no sources[].id`,
-        });
-      }
-    }
+    checkSourceRefStrings(
+      check["source_refs"],
+      SNAPSHOT_FILE,
+      ["checks", index],
+      ledger,
+      issues,
+    );
 
     const spec = asRecord(check["spec"]);
+    const requirements = new Map<string, string>();
     for (const [reqIndex, rawRequirement] of (spec === null
       ? []
       : (asArray(spec["requirements"]) ?? [])
     ).entries()) {
       const requirement = asRecord(rawRequirement);
-      const requirementId =
-        requirement === null ? null : asString(requirement["id"]);
+      if (requirement === null) continue;
+      const requirementId = asString(requirement["id"]);
       if (requirementId === null) continue;
+      requirements.set(requirementId, asString(requirement["text"]) ?? "");
       requirementIdEntries.push({
         value: requirementId,
-        location: pointer(
+        location: at(
+          SNAPSHOT_FILE,
           "checks",
           index,
           "spec",
@@ -611,6 +877,14 @@ export async function validateRegistry(
           reqIndex,
           "id",
         ),
+      });
+    }
+
+    if (ruleId !== null && !byRuleId.has(ruleId)) {
+      byRuleId.set(ruleId, {
+        index,
+        ruleVersion: asString(check["rule_version"]),
+        requirements,
       });
     }
   }
@@ -640,7 +914,7 @@ export async function validateRegistry(
     if (current.value <= previous.value) {
       issues.push({
         code: "ordinal-not-ascending",
-        location: pointer("checks", current.checkIndex, "ordinal"),
+        location: at(SNAPSHOT_FILE, "checks", current.checkIndex, "ordinal"),
         message: `ordinal ${String(current.value)} does not follow ${String(previous.value)} in ascending order`,
       });
     }
@@ -649,63 +923,528 @@ export async function validateRegistry(
     if (ordinal.value !== index + 1) {
       issues.push({
         code: "ordinal-not-contiguous",
-        location: pointer("checks", ordinal.checkIndex, "ordinal"),
+        location: at(SNAPSHOT_FILE, "checks", ordinal.checkIndex, "ordinal"),
         message: `expected ordinal ${String(index + 1)}, found ${String(ordinal.value)}`,
       });
     }
   }
 
-  // An unreferenced source is dead provenance: it claims the registry rests on
-  // something no rule cites.
-  for (const [index, raw] of sources.entries()) {
-    const source = asRecord(raw);
-    const id = source === null ? null : asString(source["id"]);
-    if (id === null || referencedSourceIds.has(id)) continue;
+  return byRuleId;
+}
+
+/** A `source_refs: ["a", "b"]` list of bare ledger identifiers. */
+function checkSourceRefStrings(
+  value: unknown,
+  file: string,
+  path: readonly (string | number)[],
+  ledger: Ledger,
+  issues: RegistryIssue[],
+): void {
+  for (const [index, raw] of (asArray(value) ?? []).entries()) {
+    const ref = asString(raw);
+    if (ref === null) continue;
+    ledger.referenced.add(ref);
+    if (ledger.ids.has(ref)) continue;
     issues.push({
-      code: "orphan-source",
-      location: pointer("sources", index, "id"),
-      message: `source "${id}" is referenced by no check`,
+      code: "unresolved-source-ref",
+      location: at(file, ...path, "source_refs", index),
+      message: `source_refs entry "${ref}" resolves to no source in ${LEDGER_FILE}`,
+    });
+  }
+}
+
+/** A `source_refs: [{ source, section? }]` list of ledger citations. */
+function checkSourceRefObjects(
+  value: unknown,
+  path: readonly (string | number)[],
+  ledger: Ledger,
+  issues: RegistryIssue[],
+): void {
+  for (const [index, raw] of (asArray(value) ?? []).entries()) {
+    const ref = asRecord(raw);
+    const id = ref === null ? null : asString(ref["source"]);
+    if (id === null) continue;
+    ledger.referenced.add(id);
+    if (ledger.ids.has(id)) continue;
+    issues.push({
+      code: "unresolved-source-ref",
+      location: at(RULESET_FILE, ...path, "source_refs", index, "source"),
+      message: `source "${id}" resolves to no source in ${LEDGER_FILE}`,
+    });
+  }
+}
+
+function collectTodos(
+  node: Record<string, unknown>,
+  file: string,
+  path: readonly (string | number)[],
+  notes: RegistryNote[],
+): void {
+  for (const [index, raw] of (asArray(node["todo"]) ?? []).entries()) {
+    const text = asString(raw);
+    if (text === null) continue;
+    notes.push({
+      code: "open-todo",
+      location: at(file, ...path, "todo", index),
+      message: text,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The ruleset, and its joins with the other two files
+// ---------------------------------------------------------------------------
+
+function checkRuleset(
+  root: Record<string, unknown>,
+  ledger: Ledger,
+  snapshotChecks: ReadonlyMap<string, SnapshotCheck>,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  collectTodos(root, RULESET_FILE, [], notes);
+
+  const declaredLedgerVersion = asString(root["source_ledger_version"]);
+  if (
+    declaredLedgerVersion !== null &&
+    ledger.version !== null &&
+    declaredLedgerVersion !== ledger.version
+  ) {
+    issues.push({
+      code: "source-ledger-version-mismatch",
+      location: at(RULESET_FILE, "source_ledger_version"),
+      message: `the ruleset draws sources from ${declaredLedgerVersion} but ${LEDGER_FILE} is ${ledger.version}`,
     });
   }
 
-  // 6. Canonical serialization and digest.
-  const projection = project(root, issues);
-  if (projection === null) return { issues, artifacts: null };
+  const rules = asArray(root["rules"]) ?? [];
+  const ruleIdEntries: Entry[] = [];
+  const assertionIdEntries: Entry[] = [];
 
-  let canonicalJson: string;
-  try {
-    canonicalJson = canonicalizeJson(projection);
-  } catch (error) {
+  for (const [index, raw] of rules.entries()) {
+    const rule = asRecord(raw);
+    if (rule === null) continue;
+    const path: readonly (string | number)[] = ["rules", index];
+
+    collectTodos(rule, RULESET_FILE, path, notes);
+
+    const ruleId = asString(rule["rule_id"]);
+    if (ruleId !== null) {
+      ruleIdEntries.push({
+        value: ruleId,
+        location: at(RULESET_FILE, ...path, "rule_id"),
+      });
+    }
+
+    // ADR-0008 section 2: the ruleset manifest has no compat pass heuristic,
+    // no ordinal, and no camelCase external id.
+    for (const key of FORBIDDEN_RULE_KEYS) {
+      if (!(key in rule)) continue;
+      issues.push({
+        code: "forbidden-ruleset-field",
+        location: at(RULESET_FILE, ...path, key),
+        message: `a ruleset rule may not carry "${key}"; that belongs to ${SNAPSHOT_FILE}`,
+      });
+    }
+
+    checkSourceRefStrings(
+      rule["source_refs"],
+      RULESET_FILE,
+      path,
+      ledger,
+      issues,
+    );
+
+    const spec = asRecord(rule["spec"]);
+    const declared = new Map<string, string>();
+    const requirements =
+      spec === null ? [] : (asArray(spec["requirements"]) ?? []);
+    for (const [reqIndex, rawRequirement] of requirements.entries()) {
+      const assertionPath = [...path, "spec", "requirements", reqIndex];
+      const id = checkAssertion(
+        rawRequirement,
+        assertionPath,
+        ledger,
+        issues,
+        notes,
+      );
+      if (id === null) continue;
+      const requirement = asRecord(rawRequirement);
+      declared.set(id, asString(requirement?.["text"]) ?? "");
+      assertionIdEntries.push({
+        value: id,
+        location: at(RULESET_FILE, ...assertionPath, "id"),
+      });
+    }
+
+    for (const [compatIndex, rawCompat] of (
+      asArray(rule["compat_assertions"]) ?? []
+    ).entries()) {
+      const assertionPath = [...path, "compat_assertions", compatIndex];
+      const id = checkAssertion(
+        rawCompat,
+        assertionPath,
+        ledger,
+        issues,
+        notes,
+      );
+      if (id === null) continue;
+      assertionIdEntries.push({
+        value: id,
+        location: at(RULESET_FILE, ...assertionPath, "id"),
+      });
+    }
+
+    if (ruleId === null) continue;
+    const published = snapshotChecks.get(ruleId);
+    checkRetirements(rule, path, published, declared, issues, notes);
+    if (published === undefined) continue;
+    reportDeltas(rule, path, published, declared, issues, notes);
+  }
+
+  checkUnique(ruleIdEntries, "duplicate-rule-id", "rule_id", issues);
+  // The same global namespace the snapshot's requirement ids live in: an
+  // assertion id is public API and a finding must name exactly one rule.
+  checkUnique(
+    assertionIdEntries,
+    "duplicate-assertion-id",
+    "assertion id",
+    issues,
+  );
+}
+
+/**
+ * Validates one assertion declaration and returns its id.
+ *
+ * ADR-0002 section 6 makes the parameter schema a per-assertion contract that a
+ * rule cannot widen, so its well-formedness is checked here rather than at the
+ * point a rule reports an outcome.
+ */
+function checkAssertion(
+  raw: unknown,
+  path: readonly (string | number)[],
+  ledger: Ledger,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): string | null {
+  const assertion = asRecord(raw);
+  if (assertion === null) return null;
+
+  collectTodos(assertion, RULESET_FILE, path, notes);
+  checkSourceRefObjects(assertion["source_refs"], path, ledger, issues);
+
+  const id = asString(assertion["id"]);
+  const label = id ?? "(unnamed assertion)";
+
+  // An assertion with no citation is permitted only where the data says so.
+  // ADR-0002 section 6 requires the citations; no accepted decision assigns
+  // them yet, and the difference between "not decided" and "dropped" has to be
+  // written down or it is not a difference.
+  const refs = asArray(assertion["source_refs"]) ?? [];
+  const todos = asArray(assertion["todo"]) ?? [];
+  if (refs.length === 0 && todos.length === 0) {
     issues.push({
-      code: "canonicalization-failed",
-      location: "",
-      message: error instanceof Error ? error.message : String(error),
+      code: "uncited-assertion",
+      location: at(RULESET_FILE, ...path, "source_refs"),
+      message: `${label} cites no source and records no todo saying why`,
     });
-    return { issues, artifacts: null };
+  }
+
+  const excerptAuthorized = assertion["excerpt_authorized"] === true;
+  const nameEntries: Entry[] = [];
+  for (const [paramIndex, rawParam] of (
+    asArray(assertion["params"]) ?? []
+  ).entries()) {
+    const param = asRecord(rawParam);
+    if (param === null) continue;
+    const name = asString(param["name"]);
+    if (name !== null) {
+      nameEntries.push({
+        value: name,
+        location: at(RULESET_FILE, ...path, "params", paramIndex, "name"),
+      });
+    }
+    if (asString(param["kind"]) === "excerpt" && !excerptAuthorized) {
+      issues.push({
+        code: "unauthorized-excerpt",
+        location: at(RULESET_FILE, ...path, "params", paramIndex, "kind"),
+        message: `${label} declares an excerpt parameter but excerpt_authorized is false`,
+      });
+    }
+  }
+  checkUnique(
+    nameEntries,
+    "duplicate-parameter-name",
+    `parameter name in ${label}`,
+    issues,
+  );
+
+  return id;
+}
+
+/**
+ * ADR-0008 section 2: the ruleset may add an assertion and it may retire one;
+ * it may not quietly drop one the snapshot published. A retirement with no
+ * `adr` is a validation failure.
+ */
+function checkRetirements(
+  rule: Record<string, unknown>,
+  path: readonly (string | number)[],
+  published: SnapshotCheck | undefined,
+  declared: ReadonlyMap<string, string>,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  for (const [index, raw] of (
+    asArray(rule["retired_requirements"]) ?? []
+  ).entries()) {
+    const retirement = asRecord(raw);
+    if (retirement === null) continue;
+    const retiredPath = [...path, "retired_requirements", index];
+    const id = asString(retirement["id"]);
+    const adr = asString(retirement["adr"]);
+    const reason = asString(retirement["reason"]);
+    const label = id ?? "(unnamed)";
+
+    if (adr === null || adr === "") {
+      issues.push({
+        code: "retirement-without-adr",
+        location: at(RULESET_FILE, ...retiredPath),
+        message: `retiring "${label}" needs the adr that retired it`,
+      });
+    }
+    if (reason === null || reason === "") {
+      issues.push({
+        code: "retirement-without-reason",
+        location: at(RULESET_FILE, ...retiredPath),
+        message: `retiring "${label}" needs a reason`,
+      });
+    }
+    if (id === null) continue;
+
+    if (declared.has(id)) {
+      issues.push({
+        code: "retired-and-declared",
+        location: at(RULESET_FILE, ...retiredPath, "id"),
+        message: `"${id}" is retired and also declared by the same rule`,
+      });
+    }
+    if (published !== undefined && !published.requirements.has(id)) {
+      issues.push({
+        code: "retirement-not-published",
+        location: at(RULESET_FILE, ...retiredPath, "id"),
+        message: `"${id}" is retired but ${SNAPSHOT_FILE} never published it for this rule`,
+      });
+    }
+    if (adr !== null) {
+      notes.push({
+        code: "requirement-retired",
+        location: at(RULESET_FILE, ...retiredPath, "id"),
+        message: `"${id}" is retired by ${adr}`,
+      });
+    }
+  }
+}
+
+/**
+ * The superset check and the listed deltas of ADR-0008 sections 2 and 5.
+ *
+ * A dropped requirement is an error. An addition, a retirement, a changed
+ * requirement text and a `rule_version` difference are all printed and none of
+ * them is an error: the snapshot's `rule_version` is frozen metadata that may
+ * lag the ruleset by any distance, which is the invariant the first revision of
+ * ADR-0008 got wrong.
+ */
+function reportDeltas(
+  rule: Record<string, unknown>,
+  path: readonly (string | number)[],
+  published: SnapshotCheck,
+  declared: ReadonlyMap<string, string>,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  const retired = new Set<string>();
+  for (const raw of asArray(rule["retired_requirements"]) ?? []) {
+    const id = asString(asRecord(raw)?.["id"]);
+    if (id !== null) retired.add(id);
+  }
+
+  for (const [id, publishedText] of published.requirements) {
+    if (retired.has(id)) continue;
+    if (!declared.has(id)) {
+      issues.push({
+        code: "dropped-requirement",
+        location: at(RULESET_FILE, ...path, "spec", "requirements"),
+        message: `${SNAPSHOT_FILE} publishes "${id}" for this rule; the ruleset neither declares nor retires it`,
+      });
+      continue;
+    }
+    if (declared.get(id) !== publishedText) {
+      notes.push({
+        code: "requirement-text-changed",
+        location: at(RULESET_FILE, ...path, "spec", "requirements"),
+        message: `"${id}" reads differently in the ruleset than in the snapshot`,
+      });
+    }
+  }
+
+  for (const id of declared.keys()) {
+    if (published.requirements.has(id)) continue;
+    notes.push({
+      code: "requirement-added",
+      location: at(RULESET_FILE, ...path, "spec", "requirements"),
+      message: `"${id}" is declared by the ruleset and was not published in the snapshot`,
+    });
+  }
+
+  const rulesetVersion = asString(rule["rule_version"]);
+  if (
+    rulesetVersion !== null &&
+    published.ruleVersion !== null &&
+    rulesetVersion !== published.ruleVersion
+  ) {
+    notes.push({
+      code: "rule-version-delta",
+      location: at(RULESET_FILE, ...path, "rule_version"),
+      message: `ruleset ${rulesetVersion}, snapshot ${published.ruleVersion}; the snapshot value is frozen metadata and is not an error`,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The validator
+// ---------------------------------------------------------------------------
+
+export async function validateRegistry(
+  input: RegistryValidationInput,
+): Promise<RegistryValidationResult> {
+  const issues: RegistryIssue[] = [];
+  const notes: RegistryNote[] = [];
+
+  const snapshotDoc = load(
+    input.snapshotYaml,
+    input.snapshotSchemaJson,
+    SNAPSHOT_FILE,
+    issues,
+  );
+  const ledgerDoc = load(
+    input.ledgerYaml,
+    input.ledgerSchemaJson,
+    LEDGER_FILE,
+    issues,
+  );
+  const rulesetDoc = load(
+    input.rulesetYaml,
+    input.rulesetSchemaJson,
+    RULESET_FILE,
+    issues,
+  );
+
+  if (
+    snapshotDoc.root === null ||
+    ledgerDoc.root === null ||
+    rulesetDoc.root === null
+  ) {
+    return { issues, notes, artifacts: null };
+  }
+
+  // Each file's dates are bounded by that file's own declared ceiling
+  // (docs/TEST_STRATEGY.md section 2.1 forbids a real clock in a test).
+  // `snapshot.captured_at` bounds the snapshot; `ledger_date` bounds the
+  // ledger, and `checkLedger` reads it, because a ledger entry verified after
+  // the snapshot was captured is the ordinary case rather than an error.
+  const snapshot = asRecord(snapshotDoc.root["snapshot"]);
+
+  if (snapshot !== null) {
+    checkDate(
+      snapshot["captured_at"],
+      at(SNAPSHOT_FILE, "snapshot", "captured_at"),
+      {
+        issues,
+        // The snapshot date cannot be in the future relative to itself; comparing
+        // it against itself would be a tautology, so only shape is checked here.
+        ceiling: null,
+      },
+    );
+    checkUrl(
+      snapshot["compatibility_source"],
+      at(SNAPSHOT_FILE, "snapshot", "compatibility_source"),
+      null,
+      issues,
+    );
+  }
+
+  const ledger = checkLedger(ledgerDoc.root, issues, notes);
+  const snapshotChecks = checkSnapshot(snapshotDoc.root, ledger, issues);
+  checkRuleset(rulesetDoc.root, ledger, snapshotChecks, issues, notes);
+
+  // An unreferenced source is dead provenance: it claims the ledger rests on
+  // something neither file cites.
+  for (const [id, index] of ledger.indexById) {
+    if (ledger.referenced.has(id)) continue;
+    issues.push({
+      code: "orphan-source",
+      location: at(LEDGER_FILE, "sources", index, "id"),
+      message: `source "${id}" is referenced by no check and no rule`,
+    });
+  }
+
+  const snapshotProjection = projectSnapshot(snapshotDoc.root, issues);
+  const rulesetProjection = projectRuleset(rulesetDoc.root, issues);
+  if (snapshotProjection === null || rulesetProjection === null) {
+    return { issues, notes, artifacts: null };
+  }
+
+  const snapshotSeal = await seal(snapshotProjection, SNAPSHOT_FILE, issues);
+  const rulesetSeal = await seal(rulesetProjection, RULESET_FILE, issues);
+  if (snapshotSeal === null || rulesetSeal === null) {
+    return { issues, notes, artifacts: null };
   }
 
   const artifacts: CanonicalArtifacts = {
-    canonicalJson,
-    digest: formatDigest(await sha256HexOfUtf8(canonicalJson)),
+    snapshot: snapshotSeal,
+    ruleset: rulesetSeal,
   };
 
   if (input.committed !== null) {
-    if (input.committed.canonicalJson !== artifacts.canonicalJson) {
-      issues.push({
-        code: "stale-canonical-json",
-        location: "specs/checks.v0.canonical.json",
-        message:
-          "committed canonical JSON is not current; run pnpm specs:canonicalise",
-      });
-    }
-    if (input.committed.digest.trim() !== artifacts.digest) {
-      issues.push({
-        code: "stale-digest",
-        location: "specs/checks.v0.digest.txt",
-        message: `committed digest is ${input.committed.digest.trim()}, expected ${artifacts.digest}`,
-      });
-    }
+    compareCommitted(
+      input.committed.snapshot,
+      artifacts.snapshot,
+      "specs/checks.v0.canonical.json",
+      "specs/checks.v0.digest.txt",
+      issues,
+    );
+    compareCommitted(
+      input.committed.ruleset,
+      artifacts.ruleset,
+      "specs/ruleset.standard.v0.canonical.json",
+      "specs/ruleset.standard.v0.digest.txt",
+      issues,
+    );
   }
 
-  return { issues, artifacts };
+  return { issues, notes, artifacts };
+}
+
+function compareCommitted(
+  committed: DigestPair,
+  current: DigestPair,
+  canonicalFile: string,
+  digestFile: string,
+  issues: RegistryIssue[],
+): void {
+  if (committed.canonicalJson !== current.canonicalJson) {
+    issues.push({
+      code: "stale-canonical-json",
+      location: canonicalFile,
+      message: `committed canonical JSON is not current; run pnpm specs:canonicalise`,
+    });
+  }
+  if (committed.digest.trim() !== current.digest) {
+    issues.push({
+      code: "stale-digest",
+      location: digestFile,
+      message: `committed digest is ${committed.digest.trim()}, expected ${current.digest}`,
+    });
+  }
 }
