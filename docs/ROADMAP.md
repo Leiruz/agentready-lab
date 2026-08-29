@@ -2,12 +2,13 @@
 
 - Status: Proposed
 - Snapshot date: 2026-08-28
-- Current phase: Phase 0 — reviewed implementation blueprint
+- Current phase: Phase 1, a working `local-loopback` scanner
 
 > [!IMPORTANT]
-> Roadmap items are plans, not shipped features. Check `PROJECT_STATUS.md` for
-> the current implementation state. No milestone is complete until its code,
-> deterministic tests, documentation, and status update are merged together.
+> M0 and M1 are built; M2 onwards are plans, not shipped features. Section 13
+> is the ledger, and `PROJECT_STATUS.md` is the current implementation state.
+> No milestone is complete until its code, deterministic tests, documentation,
+> and status update are merged together.
 
 ## 1. Sequencing principle
 
@@ -66,16 +67,33 @@ and no real network scanning.
 - package-boundary check preventing Node/global-network imports in core/rules;
 - documentation and contribution scaffolding consistent with actual status.
 
+One deliverable is outstanding: no JSON Schema source exists for the
+configuration or for the canonical report. `packages/core` exports a Draft
+2020-12 validator, and the only schemas it is given are the `specs/` registry
+schemas. Configuration is validated by hand-written code in
+`packages/cli/src/config/load.ts`, before any transport exists, and the report
+is validated by its types and its tests. No M0 acceptance criterion tests for
+either schema, which is why the criteria below can all be met without it.
+
 ### Acceptance criteria
 
-- [ ] A clean clone on Node.js 24 can run the documented M0 check command.
-- [ ] Two builds and two canonical test serializations are byte-identical.
-- [ ] Invalid sample configuration validates as invalid without a transport call.
-- [ ] `core` compiles for a Web-platform runtime without Node imports.
-- [ ] A deliberately forbidden import fails the boundary test.
-- [ ] No command can scan a real URL yet.
-- [ ] Package manifests do not advertise unimplemented binaries or releases.
-- [ ] `PROJECT_STATUS.md` is updated in the completion pull request.
+- [x] A clean clone on Node.js 24 can run the documented M0 check command.
+- [x] Two builds and two canonical test serializations are byte-identical.
+- [x] Invalid sample configuration validates as invalid without a transport call.
+- [x] `core` compiles for a Web-platform runtime without Node imports.
+- [x] A deliberately forbidden import fails the boundary test.
+- [ ] No command can scan a real URL yet. **Superseded by M1**, which is what
+      the `local-loopback` transport is. It held while M0 was the current
+      milestone and is left unticked rather than deleted, because a reader
+      comparing this list with the build is entitled to see why it disagrees.
+- [x] Package manifests do not advertise unimplemented binaries or releases.
+- [x] `PROJECT_STATUS.md` is updated in the completion pull request.
+
+One of these is true and unenforced. Build reproducibility was verified by
+rebuilding with `tsc --build --force` and comparing the digests of every
+emitted file, and no test or CI step repeats that, so it can regress silently.
+The canonical-serialization half of the same criterion is enforced, by the
+byte-identity tests in `packages/reporters` and `packages/core`.
 
 ### Explicitly deferred
 
@@ -116,26 +134,41 @@ receive deterministic human and JSON reports. No public target can be scanned.
 
 ### Acceptance criteria
 
-- [ ] All 49 protocol fixture contracts pass locally.
-- [ ] All M1 security/boundary fixtures pass.
-- [ ] The `local-loopback` transport rejects redirects away from the exact supplied origin.
-- [ ] HTML and Markdown observations of the same URL never deduplicate.
-- [ ] Robots, AI crawler, and Content Signals rules share one robots observation.
-- [ ] Dispatch order is plan order and latency does not move it: request N+1 is
+- [x] All 49 protocol fixture contracts pass locally. Every one of the 49 case
+      ids is named by a rule contract test, which section 6 of
+      `TEST_STRATEGY.md` defines as an in-memory observation set rather than a
+      served fixture. The bytes are therefore written twice, in the case and in
+      the contract test, and nothing mechanically ties the two copies together.
+- [ ] All M1 security/boundary fixtures pass. Eleven of the twelve are named by
+      a test. `sec-012`, request budget exhausted during rule planning, is
+      named by none, although `packages/core/test/run-scan.test.ts` covers the
+      behavior it describes.
+- [x] The `local-loopback` transport rejects redirects away from the exact supplied origin.
+- [x] HTML and Markdown observations of the same URL never deduplicate.
+- [x] Robots, AI crawler, and Content Signals rules share one robots observation.
+- [x] Dispatch order is plan order and latency does not move it: request N+1 is
       not dispatched before request N settles, and canonical JSON is
       byte-identical across per-response latency profiles.
-- [ ] Reversed and re-segmented chunk arrival does not change canonical JSON,
+- [x] Reversed and re-segmented chunk arrival does not change canonical JSON,
       including a segmentation where the byte that crosses a whole-scan
       threshold arrives alone as the final chunk.
-- [ ] Every assertion/finding code has a positive and negative test.
-- [ ] Complete response bodies, credentials, cookies, and raw exceptions are
+- [ ] Every assertion/finding code has a positive and negative test. Not
+      reachable as written at the current rule versions. Several outcome kinds
+      cannot be produced by any target behavior, which
+      `specs/templates.v0.yaml` records against each one, and
+      `skills.archive-safety` is deferred by ADR-0010 and emits no finding at
+      all. Those cases have a positive test and no negative one, and inventing
+      a negative test would mean inventing a trigger the rule does not have.
+- [x] Complete response bodies, credentials, cookies, and raw exceptions are
       absent from reports.
-- [ ] Human output works without color and JSON stdout contains JSON only.
-- [ ] CLI help and exit behavior have golden tests.
-- [ ] The `ci-public` profile exits as an unsupported/configuration condition and makes no
+- [x] Human output works without color and JSON stdout contains JSON only.
+- [x] CLI help and exit behavior have golden tests.
+- [x] The `ci-public` profile exits as an unsupported/configuration condition and makes no
       public connection.
 - [ ] Version `0.1.0` release criteria in `IMPLEMENTATION_SPEC.md` are satisfied
-      before calling the CLI usable.
+      before calling the CLI usable. Section 24 requires that the JSON validate
+      against a committed schema, and no report schema is committed. The other
+      section 24 items are met.
 
 The two dispatch criteria replace "Reordering promise completion does not change
 canonical JSON", which named a mechanism this design does not have. Under
@@ -144,10 +177,19 @@ settled, and ADR-0002 makes rules synchronous, so there is no rule-facing
 promise to reorder. What that criterion reached for is now structural; latency
 and chunk segmentation are the free variables the tests permute instead.
 
+One M1 deliverable is also outstanding. ADR-0006's layer-B raw socket harness
+is not built, so fixtures `lnk-001` and `lnk-002` cannot be served by anything:
+a normalized `Response` folds repeated `Link` field lines, which is the whole
+reason those two cases are layer B. Their rule contracts pass through the
+in-memory transport, which can carry the repeated shape.
+
 ### Release opportunity
 
 After M1, the project may publish an explicitly experimental `local-loopback`-only
 `0.1.0`. Public fixture hosting is optional and does not expand scanner egress.
+
+That release is not available yet. `IMPLEMENTATION_SPEC.md` section 24 governs
+it, and its committed-schema requirement is unmet.
 
 ## 5. M2 — Report and CI contracts
 
@@ -390,8 +432,8 @@ non-goals, and the status document that must remain accurate.
 
 | Milestone | State | Completion evidence |
 | --- | --- | --- |
-| M0 — Repository foundation | Not started | None; blueprint only |
-| M1 — Deterministic local lab | Not started | None |
+| M0 — Repository foundation | Complete | Seven of eight criteria met; the eighth, "no command can scan a real URL yet", is superseded by M1. `pnpm check` exits 0. One deliverable outstanding: no config or report JSON Schema |
+| M1 — Deterministic local lab | Substantially complete | Every deliverable except the layer-B socket harness; ten of thirteen criteria met. Open: `sec-012` untested, unreachable outcome kinds have no negative test, no committed report schema |
 | M2 — Report and CI contracts | Not started | None |
 | M3 — Secure `ci-public` transport | Not started | None |
 | M4 — Protocol expansion | Not started | None |
@@ -399,4 +441,6 @@ non-goals, and the status document that must remain accurate.
 | M6 — Browser and commerce research | Not started | None |
 
 Update this ledger and `PROJECT_STATUS.md` only after the relevant acceptance
-criteria have been verified in CI.
+criteria have been verified in CI. One exception is recorded above rather than
+hidden: M0's build-reproducibility criterion was verified by hand, because no
+CI step compares two builds.

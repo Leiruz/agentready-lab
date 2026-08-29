@@ -3,9 +3,11 @@
 ## Purpose
 
 AgentReady Lab is an independent, open-source conformance and interoperability
-test system for agent-facing web mechanisms. It is currently a reviewed
-implementation blueprint, not a working scanner. Never imply that it is
-affiliated with, endorsed by, or certified by Cloudflare.
+test system for agent-facing web mechanisms. It is a working `local-loopback`
+scanner: `check` scans one exact loopback origin against the eight implemented
+rules and produces a report with real findings. Public scanning, an npm
+package, a `bin`, a release, and the GitHub Action do not exist. Never imply
+that it is affiliated with, endorsed by, or certified by Cloudflare.
 
 The implementation must be deterministic, local-first, evidence-backed, safe
 against hostile network input, and usable without IsItAgentReady or an LLM.
@@ -32,31 +34,39 @@ Preserve unrelated user changes.
 
 ## Current phase and commands
 
-`PROJECT_STATUS.md` is the source of truth for what exists. Before M0, package
-scripts and CLI commands are planned interfaces only. Do not claim that a
-planned command ran or that a planned feature works.
+`PROJECT_STATUS.md` is the source of truth for what exists. M0's acceptance
+criteria are met and M1 is substantially complete, so `pnpm check` is
+authoritative. Do not claim that a planned command ran or that a planned
+feature works.
 
-The planned Node.js 24 LTS and pnpm commands are:
+These Node.js 24 LTS and pnpm root scripts exist and do the work their names
+describe:
 
-- `pnpm build`
+- `pnpm build`, `pnpm clean`
 - `pnpm typecheck`
-- `pnpm lint`
-- `pnpm format:check`
-- `pnpm test`
-- `pnpm test:unit`
-- `pnpm test:integration`
-- `pnpm test:security`
+- `pnpm lint`, `pnpm format`, `pnpm format:check`
+- `pnpm test`, `pnpm test:unit`, `pnpm test:boundaries`, `pnpm test:workers`
+- `pnpm specs:validate`, `pnpm specs:canonicalise`
+- `pnpm status:check`, `pnpm status:write`
 - `pnpm check`
-- `pnpm fixtures:dev`
-- `pnpm action:package`
-- `pnpm action:verify`
 
-Use a command only after the current milestone implements it. Once M0 makes
-`pnpm check` authoritative, run targeted tests first and `pnpm check` before
-handoff. Report exact commands, exit status, and relevant output.
+`pnpm test:integration` and `pnpm test:security` exist as scripts and run no
+tests. Each prints the milestone that owns it and exits 0, so a green run of
+either is evidence of nothing.
 
-`pnpm fixtures:deploy`, package publication, releases, pushes, merges, and PR
-creation always require explicit human approval.
+`pnpm fixtures:dev`, `pnpm action:package`, and `pnpm action:verify` do not
+exist. The fixture Worker's own dev server is
+`pnpm --filter fixtures-worker run dev`.
+
+The CLI implements three commands: `check <url>`, `rules list`, and
+`rules explain <rule-id>`. The package declares no `bin`, so they are reached
+through `runCli` and not through an installed executable.
+
+Run targeted tests first and `pnpm check` before handoff. Report exact
+commands, exit status, and relevant output.
+
+Deploying the fixture Worker, package publication, releases, pushes, merges,
+and PR creation always require explicit human approval.
 
 ## Package boundaries
 

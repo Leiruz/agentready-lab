@@ -11,17 +11,19 @@ import { CLI_PACKAGE_VERSION } from "./version.js";
  *
  * `check` now completes: `nodeEnvironment` supplies the pinned assertions,
  * source ledger, message templates and remediation table from
- * `packages/rules-standard`'s generated projection of `specs/`, and six of the
- * eight rules are `supported`, so a scan of a loopback origin produces a
- * report with real findings and an exit code derived from them.
+ * `packages/rules-standard`'s generated projection of `specs/`, and all eight
+ * rules are `supported`, so a scan of a loopback origin produces a report with
+ * real findings and an exit code derived from them. The default `content`
+ * profile selects six of the eight; `agent-service` and `full` select all of
+ * them, which is profile membership and not implementation status.
  *
- * The package still declares no `bin`, and that is now the narrower claim it
- * was always meant to be. `docs/IMPLEMENTATION_SPEC.md` section 10 makes help
- * text and exit-code goldens the bar for a command to be public, and
- * `web.discovery.sitemap` and `agent.discovery.skills` are still `planned`, so
- * a default invocation is refused rather than served with two silent gaps. A
- * `bin` entry belongs with the last two rules. Everything here is reachable
- * through `runCli` by any caller that wires an environment.
+ * The package still declares no `bin`, and that is now a claim about
+ * distribution rather than about the command. `docs/IMPLEMENTATION_SPEC.md`
+ * section 25 still lists the npm scope and the binary name among the open
+ * decisions, and every manifest in this workspace is `private` at version
+ * `0.0.0`, so a `bin` entry would name an executable nobody can install.
+ * Everything here is reachable through `runCli` by any caller that wires an
+ * environment.
  */
 export { CLI_PACKAGE_VERSION } from "./version.js";
 

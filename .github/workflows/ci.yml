@@ -84,11 +84,15 @@ jobs:
       - name: 4. Unit and contract tests
         # docs/TEST_STRATEGY.md section 2.4 requires this job to run with
         # network access disabled or with the global network APIs replaced by a
-        # throwing sentinel. That sentinel does not exist yet: it belongs in
-        # shared test setup under test/, not in this workflow. Blocking runner
-        # egress here is not a substitute, because the Actions runner needs its
-        # own outbound connection to report the job. Until the sentinel lands,
-        # this step does NOT enforce the network restriction.
+        # throwing sentinel. The sentinel is what enforces it, and it is
+        # installed by vitest.config.ts rather than by this workflow:
+        # packages/testkit/src/sentinel/network-sentinel.ts patches fetch and
+        # net.Socket#connect, and `setupFiles` wires deny-all into the `unit`
+        # project and loopback-only into the `loopback` project. The
+        # `boundaries` project has no setup file; it reads manifests and
+        # tsconfig files off disk and opens no socket. Blocking runner egress
+        # here would not be a substitute in any case, because the Actions
+        # runner needs its own outbound connection to report the job.
         run: pnpm run test
 
       - name: 5. Workers fixture tests

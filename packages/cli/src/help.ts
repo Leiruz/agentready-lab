@@ -92,11 +92,12 @@ CONFIGURATION
   and --exclude take the union.
 
 NOTE
-  Six of the eight rules in this build are implemented and 'check' produces a
-  full report for them. web.discovery.sitemap and agent.discovery.skills are
-  still implementation_status 'planned', so a profile that selects one is
-  refused with exit 2 rather than scanned with a silent gap; --exclude them to
-  run today.
+  All eight rules in this build are implemented, so 'check' produces a full
+  report for every rule a profile selects. The default content profile
+  selects six of the eight: web.discovery.api-catalog and
+  agent.discovery.skills do not list content in the pinned ruleset, so
+  reaching them takes --profile agent-service, --profile full, or --include.
+  That is profile membership, not implementation status.
 `;
 
 export const RULES_HELP = `agentready-lab rules - inspect the pinned ruleset

@@ -35,8 +35,9 @@ import {
  * `source_ledger_version` 0.4.0, under the ADR-0002 section 10 mapping.
  * `test/registry.test.ts` re-reads both files and compares, so a value edited
  * here without the spec is a test failure rather than a silent divergence.
- * `implementationStatus` therefore still reads `planned`: the ruleset says so,
- * and this file is not the place to contradict it.
+ * `implementationStatus` reads `supported`, matching the ruleset. The ruleset
+ * is the authority for it, and the two are moved together or the registry test
+ * fails.
  *
  * The pinned draft this rule implements is transcribed once, in
  * `src/data/agent-skills-v0.2.0.ts`, with the ledger commit that is its

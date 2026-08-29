@@ -16,10 +16,15 @@ import type { FakeRuleSpec } from "./support/environment.js";
  *
  * These run a real scan. `runScan`, `buildReport`, `deriveRuleStatus` and both
  * reporters all execute; only the rule behaviour and the pinned artifacts are
- * injected, because `packages/rules-standard` is entirely `planned` and no
- * pinned templates exist yet. That is the honest boundary of what can be
- * tested today, and it is the whole of the CLI's own contribution: everything
- * from "a report exists" to "the process exits N" is exercised here.
+ * injected. That is no longer a gap in `packages/rules-standard`: all eight of
+ * its rules are `supported`, and their message templates and remediation
+ * entries are pinned in `src/generated/pinned-artifacts.ts`. It is what the
+ * matrix needs. Every cell names an outcome, a requirement class and a
+ * strictness flag, and reaching all of them takes a rule whose outcome the
+ * test chooses, including the contract violation no correct rule commits.
+ * `fakeRule` plans zero requests as well, so this stays the whole of the CLI's
+ * own contribution: everything from "a report exists" to "the process exits N"
+ * is exercised here, and nothing reaches the transport.
  */
 
 /**

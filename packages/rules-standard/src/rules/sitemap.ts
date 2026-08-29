@@ -36,8 +36,9 @@ import {
  * `source_ledger_version` 0.4.0, under the ADR-0002 section 10 mapping.
  * `test/registry.test.ts` re-reads both files and compares, so a value edited
  * here without the spec is a test failure rather than a silent divergence.
- * `implementationStatus` therefore still reads `planned`: the ruleset is the
- * authority for it and this change does not edit `specs/`.
+ * `implementationStatus` reads `supported`, matching the ruleset. The ruleset
+ * is the authority for it, and the two are moved together or the registry test
+ * fails.
  *
  * THIS IS THE ONE M1 RULE THAT USES ROUND TWO. `roundTwoBudget` is 1, and the
  * placeholder's 0 was a value to set rather than a limit to work around: the

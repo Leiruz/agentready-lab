@@ -116,7 +116,11 @@ describe("workspace shape", () => {
     expect(manifest.version).toBe("0.0.0");
   });
 
-  it("does not give the CLI a bin entry before the M1 check command", () => {
+  it("declares no bin entry for the CLI", () => {
+    // `check` is implemented, so this is no longer a claim about the command.
+    // docs/IMPLEMENTATION_SPEC.md section 25 still lists the npm scope and the
+    // binary name among the open decisions, and every manifest here is private
+    // at 0.0.0, so a `bin` would name an executable nobody can install.
     expect(readManifest("packages/cli").bin).toBeUndefined();
   });
 });
