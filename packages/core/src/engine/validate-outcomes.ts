@@ -157,7 +157,36 @@ export class RulesetAssertionIndex {
     }
   }
 
+  /**
+   * The **active** assertions for one rule and mode: declared for that mode
+   * and not deferred.
+   *
+   * ADR-0010 section 4 excludes a deferred assertion from the set every other
+   * check in this file works over, which is what makes the marker do
+   * something rather than sit in the data. Excluded here rather than at each
+   * of the four call sites, because a check that has to remember to skip is
+   * one edit away from not skipping.
+   */
   forRule(
+    ruleId: string,
+    mode: InterpretationMode,
+  ): readonly RulesetAssertion[] {
+    return this.#forMode(ruleId, mode).filter(
+      (assertion) => assertion.deferred === undefined,
+    );
+  }
+
+  /** The complement of `forRule`: declared for the mode, and deferred. */
+  deferredForRule(
+    ruleId: string,
+    mode: InterpretationMode,
+  ): readonly RulesetAssertion[] {
+    return this.#forMode(ruleId, mode).filter(
+      (assertion) => assertion.deferred !== undefined,
+    );
+  }
+
+  #forMode(
     ruleId: string,
     mode: InterpretationMode,
   ): readonly RulesetAssertion[] {
@@ -214,6 +243,10 @@ export function validateRuleAssertions(
     }
   }
 
+  // ADR-0010 section 4: `forRule` has already dropped every deferred
+  // assertion, so the citation check below never sees one. That is the whole
+  // of what unblocks `agent.discovery.skills`, whose fourth assertion has no
+  // `source_refs` and is not owed any.
   const active = index.forRule(metadata.id, mode);
   if (active.length === 0) {
     throw new ConfigurationError(
@@ -235,9 +268,19 @@ export function validateRuleAssertions(
 export interface OutcomeValidationInput {
   readonly ruleId: string;
   readonly mode: InterpretationMode;
-  /** The pinned declarations for this rule in the active mode. */
+  /** The pinned **active** declarations for this rule in the active mode. */
   readonly declarations: readonly RulesetAssertion[];
   readonly outcomes: readonly AssertionOutcome[];
+  /**
+   * The ids this rule's ruleset entry defers for the active mode
+   * (`RulesetAssertionIndex.deferredForRule`).
+   *
+   * Optional because omitting it loses precision rather than protection: a
+   * deferred assertion is absent from `declarations` either way, so an outcome
+   * for one is still rejected, just as `unknown-assertion` rather than as the
+   * more specific `outcome-for-deferred-assertion`.
+   */
+  readonly deferred?: ReadonlySet<string>;
 }
 
 /**
@@ -262,6 +305,12 @@ export function validateRuleOutcomes(
   for (const outcome of input.outcomes) {
     const declaration = declaredById.get(outcome.assertion);
     if (declaration === undefined) {
+      if (input.deferred?.has(outcome.assertion) === true) {
+        throw new RuleContractViolation(
+          "outcome-for-deferred-assertion",
+          `${input.ruleId} reported assertion ${outcome.assertion}, which the pinned ruleset defers under ADR-0010 section 4 and which is therefore never evaluated`,
+        );
+      }
       throw new RuleContractViolation(
         "unknown-assertion",
         `${input.ruleId} reported assertion ${outcome.assertion}, which it does not declare for mode ${input.mode}`,

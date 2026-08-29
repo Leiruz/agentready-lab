@@ -1,6 +1,7 @@
 import type {
   AnyRuleDefinition,
   AssertionDeclaration,
+  AssertionDeferral,
   AssertionOutcome,
   AssertionOutcomes,
   DnsTransportQuery,
@@ -68,6 +69,8 @@ export interface AssertionOptions {
   readonly sourceIds?: readonly string[];
   readonly params?: AssertionDeclaration["params"];
   readonly excerptAuthorized?: boolean;
+  /** ADR-0010 section 4. A deferred assertion carries no sources. */
+  readonly deferred?: AssertionDeferral;
 }
 
 export function assertion(options: AssertionOptions): RulesetAssertion {
@@ -76,13 +79,23 @@ export function assertion(options: AssertionOptions): RulesetAssertion {
     id: options.id,
     mode: options.mode ?? "spec",
     requirementClass: options.requirementClass ?? "normative",
-    sourceRefs: (options.sourceIds ?? ["rfc9309"]).map((sourceId) => ({
-      sourceId,
-    })),
+    sourceRefs:
+      options.deferred === undefined
+        ? (options.sourceIds ?? ["rfc9309"]).map((sourceId) => ({ sourceId }))
+        : [],
     params: options.params ?? {},
     excerptAuthorized: options.excerptAuthorized ?? false,
+    ...(options.deferred === undefined ? {} : { deferred: options.deferred }),
   };
 }
+
+/** The shape `specs/ruleset.standard.v0.yaml` gives `skills.archive-safety`. */
+export const DEFERRAL: AssertionDeferral = {
+  adr: "ADR-0010",
+  reason: "the MVP does not unpack an archive, so nothing observes it",
+  until:
+    "an accepted decision permits unpacking under the section 19.6 controls",
+};
 
 export interface RuleOptions {
   readonly id: string;
@@ -238,14 +251,28 @@ export interface DispatchRecord {
 /**
  * The determinism harness of ADR-0005 section 7, tests 1 and 2.
  *
- * It throws if a second dispatch begins before the previous observation has
- * completed. That is what stops `maxConcurrency` from being reintroduced by
- * accident: the property is asserted by the transport itself, on every test
- * that uses it, rather than by one test that could be deleted.
+ * It **records** a second dispatch that begins before the previous observation
+ * has completed, into `concurrencyViolations`, and a test asserts that the
+ * list is empty after the scan.
+ *
+ * Recording rather than throwing is the whole point, and the earlier revision
+ * had it backwards. `dispatchOne` wraps every transport call in
+ * `callTransport`, which is required to convert any exception into a
+ * `connection-failed` observation so that a hostile transport cannot put a
+ * library message into a report. That is correct there and it is fatal here: a
+ * transport that enforced serial dispatch by throwing had its complaint caught
+ * by the engine and turned into an ordinary error observation, so the guard
+ * could not fail. It read like a guard and was not one.
+ *
+ * `#inFlight` therefore only ever writes to a field the engine cannot see, and
+ * the request is served normally afterwards so the rest of the scan still
+ * happens and the recorded sequence stays readable.
  */
 export class RecordingTransport implements Transport {
   readonly sequence: DispatchRecord[] = [];
   readonly urls: string[] = [];
+  /** ADR-0005 section 7 test 1. Empty on every conforming run. */
+  readonly concurrencyViolations: string[] = [];
   readonly script: TransportScript;
   readonly onCall: ((request: HttpTransportRequest) => void) | undefined;
   #inFlight = false;
@@ -266,9 +293,7 @@ export class RecordingTransport implements Transport {
 
   async http(request: HttpTransportRequest): Promise<HttpTransportResult> {
     if (this.#inFlight) {
-      throw new Error(
-        `concurrent dispatch: ${request.url} began before the previous observation settled`,
-      );
+      this.concurrencyViolations.push(request.url);
     }
     this.#inFlight = true;
     this.sequence.push({ event: "dispatched", url: request.url });
@@ -385,6 +410,8 @@ export interface ScanOptions {
   readonly remediation?: ReadonlyMap<string, FindingRemediation>;
   readonly sources?: readonly ReportSource[];
   readonly commerceEndpointConfigured?: boolean;
+  /** ADR-0007 section 1: required in `compat` mode, refused in every other. */
+  readonly externalSnapshot?: ScanInput["externalSnapshot"];
 }
 
 export function scanInput(options: ScanOptions): ScanInput {
@@ -410,6 +437,9 @@ export function scanInput(options: ScanOptions): ScanInput {
     },
     budget: { ...DEFAULT_NETWORK_BUDGET, ...options.budget },
     transport: options.transport,
+    ...(options.externalSnapshot === undefined
+      ? {}
+      : { externalSnapshot: options.externalSnapshot }),
     ...(options.include === undefined ? {} : { include: options.include }),
     ...(options.exclude === undefined ? {} : { exclude: options.exclude }),
     ...(options.ruleOptions === undefined

@@ -193,6 +193,68 @@ describe("request resolution", () => {
     );
     expect(resolution.request).toMatchObject({ name: "elsewhere.invalid" });
   });
+
+  it("resolves a page or origin-path request with no rule state at all", () => {
+    // A caller that only wants the canonical key for a request the engine
+    // will make had to fabricate a `RuleRuntimeState` and a provenance
+    // resolver to satisfy the signature, neither of which these two target
+    // kinds read. Omitting them must produce the identical resolution.
+    for (const request of [
+      httpRequest("a", "/robots.txt"),
+      {
+        kind: "http",
+        id: "page",
+        method: "GET",
+        target: { kind: "page" },
+        accept: "text/html",
+        redirects: "follow-same-origin",
+        maxEncodedBytes: 1024,
+        maxDecodedBytes: 2048,
+      } satisfies ObservationRequest,
+      {
+        kind: "dns",
+        id: "d",
+        name: { kind: "target-host" },
+        recordType: "TXT",
+      } satisfies ObservationRequest,
+    ]) {
+      expect(resolveObservationRequest(request, CONTEXT)).toStrictEqual(
+        resolveObservationRequest(
+          request,
+          CONTEXT,
+          createRuleState("a.one"),
+          RESOLVED,
+        ),
+      );
+    }
+  });
+
+  it("refuses a discovered URL when no provenance resolver is supplied", () => {
+    // Fail-closed, not permissive: with nothing able to vouch for it, a
+    // discovered URL is refused exactly as an unknown-provenance one is.
+    const resolution = resolveObservationRequest(
+      {
+        kind: "http",
+        id: "c",
+        method: "GET",
+        target: {
+          kind: "discovered",
+          url: "http://127.0.0.1:8787/found",
+          provenance: { fromObservation: "seed", locator: "/0" },
+        },
+        accept: "text/html",
+        redirects: "follow-same-origin",
+        maxEncodedBytes: 1024,
+        maxDecodedBytes: 2048,
+      },
+      CONTEXT,
+    );
+    expect(resolution.request).toMatchObject({ kind: "refused" });
+    expect(resolution.refusal).toStrictEqual({
+      code: "invalid-url",
+      phase: "policy",
+    });
+  });
 });
 
 describe("header ordering in the key", () => {

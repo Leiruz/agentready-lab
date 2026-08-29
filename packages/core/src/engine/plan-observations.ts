@@ -100,15 +100,27 @@ interface Resolution {
  *
  * The rule does not decide whether a discovered URL is authorized. It says
  * where the URL came from, and the engine decides (ADR-0002 section 7).
+ *
+ * `state` and `provenanceResolver` are optional because they are read on
+ * exactly one code path: deciding whether a *discovered* URL or DNS name has
+ * acceptable provenance. A `page`, `origin-path`, `target-host` or
+ * `target-host-prefixed` request never consults either, so a caller that only
+ * wants the canonical key for one of those had to fabricate a rule state to
+ * satisfy the signature. Omitting them is fail-closed rather than permissive:
+ * with no resolver there is nothing that can vouch for a discovered URL, so
+ * provenance reads as unresolved and the request is refused exactly as an
+ * unknown-provenance one is.
  */
 export function resolveObservationRequest(
   request: ObservationRequest,
   context: PlanningContext,
-  state: RuleRuntimeState,
-  provenanceResolver: ProvenanceResolver,
+  state?: RuleRuntimeState,
+  provenanceResolver?: ProvenanceResolver,
 ): Resolution {
   const scope = context.target.scope;
   const profile = context.networkProfile;
+  const vouched = (provenance: DiscoveredProvenance): boolean =>
+    state !== undefined && provenanceResolver?.(state, provenance) === true;
 
   if (request.kind === "dns") {
     const host = targetHost(context.target);
@@ -118,7 +130,7 @@ export function resolveObservationRequest(
     } else if (request.name.kind === "target-host-prefixed") {
       name = `${request.name.prefix}.${host}`;
     } else {
-      if (!provenanceResolver(state, request.name.provenance)) {
+      if (!vouched(request.name.provenance)) {
         return {
           request: {
             kind: "refused",
@@ -162,7 +174,7 @@ export function resolveObservationRequest(
     const origin = URL.parse(context.target.origin);
     const decision = authorizeDiscoveredUrl(
       request.target.url,
-      provenanceResolver(state, request.target.provenance),
+      vouched(request.target.provenance),
       {
         authorizedOrigin: origin === null ? "" : origin.origin,
         authorizedPort: origin === null ? "" : origin.port,

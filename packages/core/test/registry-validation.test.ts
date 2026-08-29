@@ -707,10 +707,58 @@ const MUTATIONS: readonly {
     name: "a ruleset drawing sources from a ledger version that is not the ledger's",
     file: "rulesetYaml",
     code: "source-ledger-version-mismatch",
+    // The version this names must differ from whatever the ledger currently
+    // declares, and naming the ledger's own previous value does not: this case
+    // silently stopped mutating when ADR-0010 moved both files to 0.4.0. A
+    // version no ledger will ever carry cannot go stale that way.
     mutate: (yaml) =>
       yaml.replace(
-        'source_ledger_version: "0.3.0"',
-        'source_ledger_version: "0.4.0"',
+        /^source_ledger_version: "[0-9.]+"$/m,
+        'source_ledger_version: "99.0.0"',
+      ),
+  },
+
+  // --- ADR-0010's new invariants ------------------------------------------
+
+  {
+    // Prohibition 1. `normative` is the only strength that maps a `violated`
+    // outcome to `fail`, so no fail may rest on this project's own opinion.
+    name: "a normative assertion citing the project-policy source",
+    file: "rulesetYaml",
+    code: "project-policy-normative-citation",
+    mutate: (yaml) =>
+      yaml.replace(
+        '- id: "links.agent-useful"\n          strength: "advisory"',
+        '- id: "links.agent-useful"\n          strength: "normative"',
+      ),
+  },
+  {
+    // Prohibition 2. ADR-0002 section 6 copies this list into a finding
+    // wholesale, so a mixed list renders as one authority list and the RFC
+    // beside the policy reads as endorsement.
+    name: "an assertion mixing the project-policy source with an RFC",
+    file: "rulesetYaml",
+    code: "project-policy-source-mixed",
+    mutate: (yaml) =>
+      yaml.replace(
+        '- source: "agentready-lab-agent-useful-relations"\n              section: "2"\n',
+        '- source: "agentready-lab-agent-useful-relations"\n              section: "2"\n            - source: "rfc8288"\n',
+      ),
+  },
+  {
+    name: "a deferral that never says what would un-defer it",
+    file: "rulesetYaml",
+    code: "deferred-marker-incomplete",
+    mutate: (yaml) => yaml.replace(/ {12}until: >-\n(?: {14}.*\n)+/, ""),
+  },
+  {
+    name: "a deferred assertion that also cites a source",
+    file: "rulesetYaml",
+    code: "deferred-assertion-not-inert",
+    mutate: (yaml) =>
+      yaml.replace(
+        "source_refs: []\n          deferred:\n",
+        'source_refs:\n            - source: "agent-skills-discovery-v0.2.0"\n          deferred:\n',
       ),
   },
 ];
@@ -732,6 +780,19 @@ describe("mutations of the three authorities", () => {
       expect(codesOf(await validate({ [file]: mutated }))).toContain(code);
     },
   );
+
+  it("accepts the rule-level inventory that lists the policy beside an RFC", async () => {
+    // The deliberate exception ADR-0010 records. `web.discovery.link` lists
+    // `rfc8288` and `agentready-lab-agent-useful-relations` in its rule-level
+    // `source_refs`, which is an inventory of what the rule rests on and is
+    // never what a finding cites. Both prohibitions bind at assertion level
+    // only, so the committed file must stay clean: if this ever fails, the
+    // check has been written one level too high.
+    expect(RULESET).toContain(
+      '      - "agentready-lab-agent-useful-relations"',
+    );
+    expect(codesOf(await validate())).toStrictEqual([]);
+  });
 
   it("changes the ruleset digest when a verdict-bearing field changes", async () => {
     const mutated = RULESET.replace(

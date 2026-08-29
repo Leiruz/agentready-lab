@@ -1,5 +1,3 @@
-import type { Validator } from "@cfworker/json-schema";
-
 /**
  * `@agentready-lab/core`: the runtime-neutral engine, model, probe and schema
  * code of `docs/ARCHITECTURE.md` section 4.
@@ -12,14 +10,6 @@ import type { Validator } from "@cfworker/json-schema";
  * interface and `packages/transport-node` implements it.
  */
 export const CORE_PACKAGE_VERSION = "0.0.0";
-
-/**
- * JSON Schema validator type reachable from core without core depending on a
- * Node- or DOM-specific implementation. `@cfworker/json-schema` interprets
- * schemas rather than compiling them with `new Function`, so it runs in both
- * Node.js and workerd.
- */
-export type JsonSchemaValidator = Validator;
 
 export {
   CanonicalJsonError,
@@ -86,6 +76,7 @@ export type {
 export type {
   AnyRuleDefinition,
   AssertionDeclaration,
+  AssertionDeferral,
   AssertionOutcome,
   AssertionOutcomes,
   FindingParam,

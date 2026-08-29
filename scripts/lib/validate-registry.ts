@@ -685,9 +685,19 @@ interface Ledger {
   readonly version: string | null;
   /** Ledger index into `sources`, for the orphan report. */
   readonly indexById: ReadonlyMap<string, number>;
+  /**
+   * Each source's declared `kind`. ADR-0010 section 3's prohibitions are the
+   * only reason this is carried: they turn on whether a cited source is
+   * `project-policy`, which is a fact about the ledger that the ruleset's own
+   * schema cannot see.
+   */
+  readonly kindById: ReadonlyMap<string, string>;
   /** Every identifier either other file cited, resolved or not. */
   readonly referenced: Set<string>;
 }
+
+/** ADR-0010 section 1. The `kind` a self-authored source carries. */
+const PROJECT_POLICY_KIND = "project-policy";
 
 function checkLedger(
   root: Record<string, unknown>,
@@ -697,6 +707,7 @@ function checkLedger(
   const sources = asArray(root["sources"]) ?? [];
   const ids = new Set<string>();
   const indexById = new Map<string, number>();
+  const kindById = new Map<string, string>();
   const idEntries: Entry[] = [];
 
   collectTodos(root, LEDGER_FILE, [], notes);
@@ -728,6 +739,8 @@ function checkLedger(
     if (id !== null) {
       ids.add(id);
       if (!indexById.has(id)) indexById.set(id, index);
+      const kind = asString(source["kind"]);
+      if (kind !== null && !kindById.has(id)) kindById.set(id, kind);
       idEntries.push({
         value: id,
         location: at(LEDGER_FILE, "sources", index, "id"),
@@ -780,6 +793,7 @@ function checkLedger(
     ids,
     version: asString(root["source_ledger_version"]),
     indexById,
+    kindById,
     referenced: new Set<string>(),
   };
 }
@@ -1136,19 +1150,27 @@ function checkAssertion(
   const id = asString(assertion["id"]);
   const label = id ?? "(unnamed assertion)";
 
+  const deferred = asRecord(assertion["deferred"]);
+
   // An assertion with no citation is permitted only where the data says so.
-  // ADR-0002 section 6 requires the citations; no accepted decision assigns
-  // them yet, and the difference between "not decided" and "dropped" has to be
+  // ADR-0002 section 6 requires the citations; ADR-0010 section 4 adds the
+  // second permitted state. "Not decided" carries a todo, "not evaluated"
+  // carries a deferral, and "dropped" is neither: the difference has to be
   // written down or it is not a difference.
   const refs = asArray(assertion["source_refs"]) ?? [];
   const todos = asArray(assertion["todo"]) ?? [];
-  if (refs.length === 0 && todos.length === 0) {
+  if (refs.length === 0 && todos.length === 0 && deferred === null) {
     issues.push({
       code: "uncited-assertion",
       location: at(RULESET_FILE, ...path, "source_refs"),
-      message: `${label} cites no source and records no todo saying why`,
+      message: `${label} cites no source, records no todo saying why, and carries no deferred marker`,
     });
   }
+
+  if (deferred !== null) {
+    checkDeferral(deferred, assertion, label, path, issues, notes);
+  }
+  checkProjectPolicyCitations(assertion, label, path, ledger, issues);
 
   const excerptAuthorized = assertion["excerpt_authorized"] === true;
   const nameEntries: Entry[] = [];
@@ -1180,6 +1202,118 @@ function checkAssertion(
   );
 
   return id;
+}
+
+/**
+ * ADR-0010 section 4. A deferred assertion is complete, and it is inert.
+ *
+ * Complete: `adr`, `reason` and `until` are all required, on the reasoning
+ * ADR-0008 section 2 uses for `retired_requirements`. A deferral with no
+ * decision behind it is the silent pass the marker exists to prevent, and one
+ * with no `until` never comes back.
+ *
+ * Inert: no `source_refs`, no `params`, no excerpt authorization. An assertion
+ * that is not evaluated makes no claim, so a citation on it would be a claim
+ * resting on a source, and a parameter or an excerpt would be a template slot
+ * for a message that can never render. The schema says the same thing in an
+ * `if`/`then`, and it is repeated here for the reason every other duplicated
+ * constraint in this file is: the schema is one edit away.
+ *
+ * The deferral is also listed as a note, so `pnpm specs:validate` prints every
+ * one of them on a clean run rather than leaving them to be discovered by
+ * reading the YAML.
+ */
+function checkDeferral(
+  deferred: Record<string, unknown>,
+  assertion: Record<string, unknown>,
+  label: string,
+  path: readonly (string | number)[],
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  for (const field of ["adr", "reason", "until"] as const) {
+    const value = asString(deferred[field]);
+    if (value !== null && value.trim() !== "") continue;
+    issues.push({
+      code: "deferred-marker-incomplete",
+      location: at(RULESET_FILE, ...path, "deferred", field),
+      message: `${label} is deferred and states no ${field}`,
+    });
+  }
+
+  const inert: readonly (readonly [string, boolean])[] = [
+    ["source_refs", (asArray(assertion["source_refs"]) ?? []).length > 0],
+    ["params", (asArray(assertion["params"]) ?? []).length > 0],
+    ["excerpt_authorized", assertion["excerpt_authorized"] === true],
+  ];
+  for (const [field, carried] of inert) {
+    if (!carried) continue;
+    issues.push({
+      code: "deferred-assertion-not-inert",
+      location: at(RULESET_FILE, ...path, field),
+      message: `${label} is deferred and is never evaluated, so it may not carry ${field}`,
+    });
+  }
+
+  const adr = asString(deferred["adr"]) ?? "an unnamed decision";
+  const until = asString(deferred["until"]) ?? "(no condition stated)";
+  notes.push({
+    code: "deferred-assertion",
+    location: at(RULESET_FILE, ...path, "deferred"),
+    message: `${label} is deferred by ${adr} until: ${until}`,
+  });
+}
+
+/**
+ * ADR-0010 section 3, prohibitions 1 and 2, which the JSON Schema cannot
+ * express because both need the ledger and the ruleset read together.
+ *
+ * 1. No `normative` assertion cites a project-policy source. `normative` is
+ *    the only strength that maps a `violated` outcome to `fail`, and no `fail`
+ *    may rest on this project's own opinion about what is worth doing.
+ * 2. No assertion mixes a project-policy source with an external one. ADR-0002
+ *    section 6 copies `source_refs` into a finding wholesale, so a mixed list
+ *    renders as one authority list and a reader takes the RFC beside it as
+ *    endorsement. A rule needing both needs two assertions.
+ *
+ * Both bind at **assertion** level and neither binds at rule level. A rule's
+ * own `source_refs` is an inventory of what the rule rests on and is never
+ * what a finding cites, which is why `web.discovery.link` may list `rfc8288`
+ * and the relation policy together and this function is not called for it.
+ */
+function checkProjectPolicyCitations(
+  assertion: Record<string, unknown>,
+  label: string,
+  path: readonly (string | number)[],
+  ledger: Ledger,
+  issues: RegistryIssue[],
+): void {
+  const policy: string[] = [];
+  const external: string[] = [];
+  for (const raw of asArray(assertion["source_refs"]) ?? []) {
+    const id = asString(asRecord(raw)?.["source"]);
+    // An unresolved id is already reported by `checkSourceRefObjects`, and
+    // guessing a kind for it would turn one error into two.
+    if (id === null || !ledger.ids.has(id)) continue;
+    if (ledger.kindById.get(id) === PROJECT_POLICY_KIND) policy.push(id);
+    else external.push(id);
+  }
+  if (policy.length === 0) return;
+
+  if (asString(assertion["strength"]) === "normative") {
+    issues.push({
+      code: "project-policy-normative-citation",
+      location: at(RULESET_FILE, ...path, "strength"),
+      message: `${label} is normative and cites the project-policy source "${policy[0] ?? ""}"; ADR-0010 section 3 forbids a fail resting on this project's own policy`,
+    });
+  }
+  if (external.length > 0) {
+    issues.push({
+      code: "project-policy-source-mixed",
+      location: at(RULESET_FILE, ...path, "source_refs"),
+      message: `${label} cites the project-policy source "${policy[0] ?? ""}" alongside "${external[0] ?? ""}"; ADR-0002 section 6 copies this list into a finding, where a mixed list reads as external endorsement`,
+    });
+  }
 }
 
 /**

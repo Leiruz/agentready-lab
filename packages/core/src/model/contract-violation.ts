@@ -63,7 +63,18 @@ export type ContractViolationCode =
   /** No message template for an assertion and outcome kind. */
   | "missing-message-template"
   /** A template placeholder with no matching parameter. */
-  | "missing-template-parameter";
+  | "missing-template-parameter"
+  /**
+   * ADR-0010 section 4: an outcome for an assertion the pinned ruleset defers.
+   *
+   * A deferred assertion is not evaluated, so an outcome for one is a claim
+   * the scanner never checked. It is rejected rather than dropped, and it has
+   * its own code rather than sharing `unknown-assertion`, because the two
+   * point at different mistakes: an unknown assertion is a rule naming
+   * something that does not exist, and this is a rule evaluating something
+   * that exists and is deliberately not being evaluated.
+   */
+  | "outcome-for-deferred-assertion";
 
 /**
  * ADR-0002 section 5. Exit code 4.
@@ -112,6 +123,19 @@ export type ConfigurationErrorCode =
   | "assertion-sources-unassigned"
   /** A selected rule declares no assertion for the active mode. */
   | "no-assertion-for-mode"
+  /**
+   * ADR-0007 section 1: `externalSnapshot` is required in `compat` mode and
+   * refused in every other, and the scan configuration satisfies neither.
+   *
+   * Distinct from `no-assertion-for-mode`, which it shared until 2026-08-29,
+   * because the two are different faults with different repairs. That one is a
+   * ruleset that declares nothing for the mode a caller asked for; this one is
+   * a caller pairing a mode with the wrong snapshot argument, against a
+   * ruleset that may be perfectly well formed. A caller told only "no
+   * assertion for mode" would go looking in the ruleset for a defect that is
+   * not there.
+   */
+  | "external-snapshot-mode-mismatch"
   /** An assertion the rule declares that the pinned ruleset does not. */
   | "assertion-not-in-ruleset"
   /** An assertion `sourceRefs` entry that the source ledger does not resolve. */

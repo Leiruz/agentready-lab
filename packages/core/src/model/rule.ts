@@ -109,6 +109,22 @@ export interface ParamSpec {
   readonly allowedValues?: readonly string[];
 }
 
+/**
+ * ADR-0010 section 4. The assertion is declared and is not evaluated.
+ *
+ * "Not evaluated" is a fourth state beside pass, fail and retired. A deferred
+ * assertion keeps its id and its text, produces no finding of any status, and
+ * returns when `until` is met. It is read from the pinned ruleset; a rule
+ * cannot see it and cannot set it.
+ */
+export interface AssertionDeferral {
+  /** The accepted decision that deferred it, as `ADR-0010`. */
+  readonly adr: string;
+  readonly reason: string;
+  /** The event that un-defers it, not a date. */
+  readonly until: string;
+}
+
 export interface AssertionDeclaration {
   readonly id: string;
   readonly mode: InterpretationMode;
@@ -119,6 +135,11 @@ export interface AssertionDeclaration {
   readonly params: Readonly<Record<string, ParamSpec>>;
   /** True only where the ruleset explicitly authorizes a bounded excerpt. */
   readonly excerptAuthorized: boolean;
+  /**
+   * Present only on a deferred assertion (ADR-0010 section 4), which is
+   * excluded from the active set and can never produce a finding.
+   */
+  readonly deferred?: Readonly<AssertionDeferral>;
 }
 
 export interface RuleMetadata {

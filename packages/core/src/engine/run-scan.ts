@@ -104,6 +104,8 @@ export interface ScanInput {
 
 interface InvokedRule extends PlannableRule {
   readonly declarations: readonly RulesetAssertion[];
+  /** ADR-0010 section 4: declared for this mode, never evaluated. */
+  readonly deferred: ReadonlySet<string>;
   readonly planInput: PlanInput<unknown>;
   readonly gate: SelectedRule["gate"];
 }
@@ -120,8 +122,8 @@ export async function runScan(
   }
   if ((input.mode === "compat") !== (input.externalSnapshot !== undefined)) {
     throw new ConfigurationError(
-      "no-assertion-for-mode",
-      "ADR-0007 section 1: externalSnapshot is present in compat mode and absent in every other mode",
+      "external-snapshot-mode-mismatch",
+      `ADR-0007 section 1: externalSnapshot is present in compat mode and absent in every other mode; mode is ${input.mode} and externalSnapshot is ${input.externalSnapshot === undefined ? "absent" : "present"}`,
     );
   }
 
@@ -189,6 +191,11 @@ export async function runScan(
       state: createRuleState(metadata.id),
       requests: [],
       declarations,
+      deferred: new Set(
+        index
+          .deferredForRule(metadata.id, input.mode)
+          .map((declaration) => declaration.id),
+      ),
       gate: entry.gate,
       planInput: {
         mode: input.mode,
@@ -303,6 +310,7 @@ export async function runScan(
       mode: input.mode,
       declarations: rule.declarations,
       outcomes,
+      deferred: rule.deferred,
     });
     const findings = buildFindings({
       ruleId: rule.state.ruleId,

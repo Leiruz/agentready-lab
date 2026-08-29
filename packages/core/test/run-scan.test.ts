@@ -12,20 +12,25 @@ import type {
 import {
   ConfigurationError,
   RuleContractViolation,
+  RulesetAssertionIndex,
   canonicalizeJson,
   runScan,
+  validateRuleAssertions,
 } from "../src/index.js";
 import type { TransportScript } from "./support/harness.js";
 import {
   CountingTransport,
+  DEFERRAL,
   DnsCapableTransport,
   RecordingTransport,
   assertion,
   body,
   httpRequest,
   outcome,
+  remediationFor,
   rule,
   scanInput,
+  templatesFor,
 } from "./support/harness.js";
 
 /**
@@ -33,9 +38,13 @@ import {
  * ADR-0005 section 7's four determinism tests, and the M1 acceptance criteria
  * that are properties of the whole engine rather than of one function.
  *
- * `RecordingTransport` throws if a second dispatch begins before the previous
- * observation settles, so ADR-0005 section 7 test 1 is asserted by every test
- * in this file rather than by one that could be deleted.
+ * `RecordingTransport` records a dispatch that begins before the previous
+ * observation settles. ADR-0005 section 7 test 1 is the "serial dispatch" case
+ * below, which reads that record after the scan. It cannot be an exception
+ * thrown from the transport: `callTransport` in `dispatch.ts` converts every
+ * transport exception into a `connection-failed` observation, exactly as a
+ * hostile transport requires, so a throwing guard would be caught by the code
+ * it was meant to check.
  */
 
 const ROBOTS = "http://127.0.0.1:8787/robots.txt";
@@ -173,6 +182,11 @@ describe("serial dispatch", () => {
       scanInput({ rules, assertions: assertionsOf(rules), transport }),
     );
 
+    // The transport records an overlap rather than throwing on one, because
+    // `callTransport` converts any transport exception into a
+    // `connection-failed` observation and would have swallowed the complaint.
+    // The record is read here, after the scan, where nothing can catch it.
+    expect(transport.concurrencyViolations).toStrictEqual([]);
     // Every settlement kind is represented: a slow response, a fast response,
     // and an unscripted URL that the transport answers with a failure.
     expect(transport.sequence.map((entry) => entry.event)).toStrictEqual([
@@ -388,6 +402,9 @@ describe("configuration refusals", () => {
     expect((error as ConfigurationError).code).toBe("unresolved-source-ref");
   });
 
+  // ADR-0007 section 1's pairing rule has its own code, and the two
+  // directions are separate cases because a caller that cannot tell them apart
+  // cannot tell which of the two arguments to change.
   it("refuses a compat report with no external snapshot", async () => {
     const { transport, error } = await refuse({
       rules,
@@ -397,6 +414,41 @@ describe("configuration refusals", () => {
     });
     expect(transport.calls).toBe(0);
     expect(error).toBeInstanceOf(ConfigurationError);
+    expect((error as ConfigurationError).code).toBe(
+      "external-snapshot-mode-mismatch",
+    );
+  });
+
+  it("refuses a spec report that carries an external snapshot", async () => {
+    const { transport, error } = await refuse({
+      rules,
+      assertions: assertionsOf(rules),
+      transport: new CountingTransport(),
+      mode: "spec",
+      externalSnapshot: { capturedAt: "2026-08-28", schemaVersion: "0" },
+    });
+    expect(transport.calls).toBe(0);
+    expect((error as ConfigurationError).code).toBe(
+      "external-snapshot-mode-mismatch",
+    );
+  });
+
+  it("keeps no-assertion-for-mode for a ruleset that declares none", () => {
+    // The other fault that shared this code until 2026-08-29. It is raised by
+    // `validateRuleAssertions` against a well-formed configuration, so the two
+    // are now distinguishable by code alone.
+    const declaration = assertion({ id: "b.only", ruleId: "b.one" });
+    const definition = rule({ id: "b.one", assertions: [declaration] });
+    const index = new RulesetAssertionIndex([declaration]);
+
+    expect(() => {
+      validateRuleAssertions(definition.metadata, index, "interop");
+    }).toThrow(/has no pinned assertion for mode interop/);
+    try {
+      validateRuleAssertions(definition.metadata, index, "interop");
+    } catch (error) {
+      expect((error as ConfigurationError).code).toBe("no-assertion-for-mode");
+    }
   });
 
   it("refuses a request budget above the evidence ceiling", async () => {
@@ -634,6 +686,85 @@ describe("two rounds", () => {
     expect(thrown).toBeInstanceOf(RuleContractViolation);
     expect((thrown as RuleContractViolation).code).toBe(
       "unknown-observation-ref",
+    );
+  });
+});
+
+describe("deferred assertions", () => {
+  // ADR-0010 section 4 end to end. `agent.discovery.skills` declares four
+  // spec assertions and reports three outcomes, and the fourth is absent from
+  // the findings rather than present with a neutral verdict.
+  const evaluated = assertion({
+    id: "skills.path-schema",
+    ruleId: "agent.discovery.skills",
+  });
+  const deferred = assertion({
+    id: "skills.archive-safety",
+    ruleId: "agent.discovery.skills",
+    requirementClass: "recommended",
+    deferred: DEFERRAL,
+  });
+
+  it("runs the rule and reports no finding for the deferred assertion", async () => {
+    const definition = rule({
+      id: "agent.discovery.skills",
+      assertions: [evaluated],
+      declaredAssertions: [evaluated, deferred],
+    });
+
+    const report = await runScan(
+      scanInput({
+        rules: [definition],
+        assertions: [evaluated, deferred],
+        transport: new RecordingTransport(),
+        // Neither a template nor a remediation entry exists for the deferred
+        // assertion, which is the point: a deferred assertion is owed neither,
+        // and demanding either would fail the scan at exit 2.
+        templates: templatesFor([evaluated]),
+        remediation: remediationFor([evaluated]),
+      }),
+    );
+
+    expect(report.results[0]).toMatchObject({
+      ruleId: "agent.discovery.skills",
+      status: "pass",
+    });
+    expect(
+      report.results[0]?.findings.map((finding) => finding.code),
+    ).toStrictEqual([evaluated.id]);
+  });
+
+  it("refuses a rule that reports an outcome for the deferred assertion", async () => {
+    const definition = rule({
+      id: "agent.discovery.skills",
+      assertions: [evaluated],
+      declaredAssertions: [evaluated, deferred],
+      step: (): AssertionOutcomes => ({
+        kind: "outcomes",
+        outcomes: [
+          outcome(evaluated.id, "satisfied"),
+          outcome(deferred.id, "satisfied"),
+        ],
+      }),
+    });
+
+    let thrown: unknown;
+    try {
+      await runScan(
+        scanInput({
+          rules: [definition],
+          assertions: [evaluated, deferred],
+          transport: new RecordingTransport(),
+          templates: templatesFor([evaluated]),
+          remediation: remediationFor([evaluated]),
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(RuleContractViolation);
+    expect((thrown as RuleContractViolation).code).toBe(
+      "outcome-for-deferred-assertion",
     );
   });
 });

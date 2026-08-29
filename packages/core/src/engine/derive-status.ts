@@ -38,7 +38,26 @@ export function findingStatus(
   }
 }
 
-/** ADR-0002 section 5 and `docs/ARCHITECTURE.md` section 9. */
+/**
+ * ADR-0002 section 5 and `docs/ARCHITECTURE.md` section 9.
+ *
+ * `unsupported-runtime` is kept although `deriveRuleStatus` cannot reach it
+ * today, and the reason is worth stating so it is not removed as dead data. A
+ * rule whose runtime is unavailable never runs: `selectRules` resolves it to
+ * `unsupported-runtime` and `run-scan.ts` builds the result with
+ * `buildUninvokedResult`, which sets that status directly and derives nothing.
+ * So no `RuleStatus[]` reaching this list contains it *by the current call
+ * path*, which is a property of the caller and not of the type.
+ *
+ * Dropping the entry would be worse than leaving it. This constant is exported
+ * public API and is the executable form of the six-member precedence
+ * `docs/ARCHITECTURE.md` section 9 fixes; a five-member copy would disagree
+ * with the document. And `deriveRuleStatus` takes `readonly RuleStatus[]`, the
+ * whole union, so removing the entry would make the loop fall through for a
+ * well-typed input and report a documented status as "unknown finding status".
+ * An unreachable entry costs one array element; a total function that stops
+ * being total costs a wrong exit code.
+ */
 export const RULE_STATUS_PRECEDENCE = [
   "fail",
   "unable-to-check",

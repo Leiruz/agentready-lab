@@ -28,6 +28,29 @@ export function sanitizeText(value: string): string {
 }
 
 /**
+ * Truncates to `maxLength` UTF-16 code units without splitting a surrogate
+ * pair.
+ *
+ * Every cap in this file is a count of code units, and an astral character
+ * occupies two of them, so a bare `slice` can land between the halves of one
+ * and leave a lone high surrogate at the end. That is not cosmetic:
+ * `canonicalizeJson` terminates on a lone surrogate (RFC 8785 section
+ * 3.2.2.2), so a target that puts an emoji across the boundary of a header
+ * value or a URL would make the whole scan unreportable as JSON. The bounds
+ * here are all applied to target-controlled bytes, which is exactly the input
+ * that would be chosen deliberately.
+ *
+ * The half character is dropped rather than replaced, because the cap is a
+ * maximum and a replacement would need a code unit the caller did not budget.
+ */
+function bound(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const head = value.slice(0, maxLength);
+  const last = head.charCodeAt(head.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? head.slice(0, -1) : head;
+}
+
+/**
  * Bounds and sanitizes one target-influenced string for evidence.
  *
  * `docs/THREAT_MODEL.md` section 20.3 requires every evidence value to be
@@ -37,7 +60,7 @@ export function sanitizeText(value: string): string {
  * one that could disagree with it.
  */
 export function sanitizeEvidenceText(value: string, maxLength: number): string {
-  return sanitizeText(value).slice(0, maxLength);
+  return bound(sanitizeText(value), maxLength);
 }
 
 /** The 256-character cap is `docs/THREAT_MODEL.md` section 16's excerpt limit. */
@@ -47,9 +70,9 @@ export function sanitizeParam(param: FindingParam): string {
     case "http-status":
       return String(param.value);
     case "excerpt":
-      return sanitizeText(param.value).slice(0, 256);
+      return bound(sanitizeText(param.value), 256);
     default:
-      return sanitizeText(param.value).slice(0, 128);
+      return bound(sanitizeText(param.value), 128);
   }
 }
 
