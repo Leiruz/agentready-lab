@@ -93,7 +93,10 @@ requires `rule_id`, `rule_version`, `title`, `category`, `profiles`, `runtime`,
 `applicability` using the native names from ADR-0004 section 2, `source_refs`,
 `spec`, `interop`, `implementation_status`, and, where the rule implements
 `compat` mode, a `compat_assertions` block declaring the mode-specific assertion
-ids ADR-0002 section 9 requires.
+ids ADR-0002 section 9 requires. Where the rule retires a requirement the
+snapshot published, it also carries `retired_requirements` (section 2). Each
+declared assertion carries the authoritative `source_refs` and parameter schema
+that ADR-0002 section 6 requires, so a rule cannot choose its own citations.
 
 The ruleset manifest has no `compat` pass heuristic, no `ordinal`, and no
 camelCase `id`. A native rule with no external counterpart simply has no external
@@ -118,9 +121,18 @@ frozen historical content and are **not read at runtime**. The executable
 authority for what a rule asserts is `specs/ruleset.standard.v0.yaml`.
 
 To keep that from becoming silent drift, the validator asserts that for any
-`rule_id` present in both files, the ruleset's `spec.requirements` ids are a
-superset of the snapshot's, and reports every addition as a listed delta. The
-ruleset may add an assertion; it may not quietly drop one that was published.
+`rule_id` present in both files, every `spec.requirements` id in the snapshot is
+either declared by the ruleset or listed in that rule's `retired_requirements`,
+and it reports every addition, every retirement, and every changed requirement
+text as a listed delta. The ruleset may add an assertion and it may retire one;
+it may not quietly drop one that was published.
+
+`retired_requirements` is a required-when-non-empty array on a ruleset rule
+entry. Each element carries the retired `id`, the `adr` that retired it, and a
+`reason`. It exists because ADR-0009 retires `content-signals.syntax` after
+finding that no pinned source supports it, and a retirement decided in an
+accepted ADR is the opposite of a silent drop. A retirement with no `adr` is a
+validation failure.
 
 This is forbidden:
 
@@ -131,7 +143,11 @@ This is forbidden:
   or an ordinal;
 - treating `published_check_count` as this project's rule count, or reporting it
   to users as such;
-- the same `rule_id` carrying different `rule_version` semantics across files;
+- reading the snapshot's per-check `rule_version` as the native rule version,
+  reporting it to a user as this project's rule version, or resolving a native
+  `rule_id` against it. Section 5 says what it actually records;
+- retiring a snapshot requirement without a `retired_requirements` entry naming
+  the ADR that retired it;
 - a `compat`-mode result for a rule that appears only in the ruleset manifest;
 - a source identifier used anywhere that the ledger does not declare.
 
@@ -215,31 +231,62 @@ There is a gap in the source. The catalog's own note says `sig-004` "records an
 interoperability warning unless a later pinned source defines normative conflict
 handling", which is a description of an advisory finding.
 
-ADR-0009 makes two further changes to the same rule in the same version bump: it
-rewrites `content-signals.syntax` so that it rests only on RFC 9309, and it adds
-an advisory `content-signals.unrecognized-vocabulary`. Those belong to that
-decision; they are named here so the Content Signals entry is not edited twice.
+ADR-0009 makes three further changes to the same rule in the same version bump:
+it retires `content-signals.syntax` rather than rewriting it, it adds an
+advisory `content-signals.unrecognized-vocabulary`, and it changes the ruleset
+entry's `spec.claim_scope` to `detection-only`. Those belong to that decision;
+they are named here so the Content Signals entry is not edited twice. The
+retirement is what section 2's `retired_requirements` block exists for.
 
-### 5. Version numbers
+### 5. Version numbers, and what the snapshot's `rule_version` actually is
 
 The changes add public assertion identifiers and change verdicts, which
 `.claude/rules/standards.md` requires be reflected on the rule and ruleset axes.
+Every axis below belongs to `specs/ruleset.standard.v0.yaml` or to
+`specs/sources.v0.yaml`. None of them belongs to the snapshot.
 
-| Axis | From | To |
-| --- | --- | --- |
-| `web.policy.ai-crawler` `rule_version` | `0.1.0` | `0.2.0` |
-| `web.policy.content-signals` `rule_version` | `0.1.0` | `0.2.0` |
-| `ruleset_version` | `0.1.0` | `0.2.0` |
-| `source_ledger_version` | `0.1.0` | `0.2.0` |
+| Axis | Artifact | From | To |
+| --- | --- | --- | --- |
+| `web.policy.ai-crawler` `rule_version` | ruleset | `0.1.0` | `0.2.0` |
+| `web.policy.content-signals` `rule_version` | ruleset | `0.1.0` | `0.2.0` |
+| `ruleset_version` | ruleset | `0.1.0` | `0.2.0` |
+| `source_ledger_version` | source ledger | `0.1.0` | `0.2.0` |
 
 `source_ledger_version` moves because ADR-0009 requires the
 `content-signals-draft-00` entry to record a confirmed expiry date and the
 `content-signals` entry to record that the site is an application shell.
 `ruleset_version` moves because the executable interpretation changed. The
 snapshot's `snapshot.captured_at` does not move, because the snapshot is not
-edited. The remaining twenty checks keep `rule_version` `0.1.0`, which is the
-point of having separate axes. `specs/ruleset.standard.v0.yaml` is created at
-`ruleset_version` `0.2.0` so the files agree from the start.
+edited. The remaining twenty checks keep `rule_version` `0.1.0` in the ruleset,
+which is the point of having separate axes.
+`specs/ruleset.standard.v0.yaml` is created at `ruleset_version` `0.2.0`, and
+creates `web.policy.ai-crawler` and `web.policy.content-signals` at
+`rule_version` `0.2.0` directly, because a native rule's first published version
+is whatever this project's interpretation is on the day the file is written.
+
+#### The first revision required an equality invariant that cannot hold
+
+That revision forbade "the same `rule_id` carrying different `rule_version`
+semantics across files" and had the validator assert that a `rule_id` present in
+both files "carries the same `rule_version`". Adversarial review on 2026-08-29
+showed those cannot both be satisfied alongside the table above, and it is
+right. `specs/checks.v0.yaml` records `rule_version: "0.1.0"` for
+`web.policy.ai-crawler` and for `web.policy.content-signals`, the file is
+frozen, and the ruleset must create both at `0.2.0`. The invariant made the
+migration self-contradictory on the day it was written.
+
+**The equality invariant is removed.** The snapshot's per-check `rule_version`
+is external snapshot metadata: it records the rule version this project
+intended for that check on `snapshot.captured_at`, alongside the external
+tool's `ordinal`, `id`, and `compat` block. It is not the native rule version,
+it is never read at scan time, it never appears in a report, and it may lag the
+ruleset by any distance. The native rule version has exactly one home, which is
+`specs/ruleset.standard.v0.yaml`, for the same reason that
+`implementation_status` does in section 3.
+
+The validator still compares the pair. A difference is a listed delta, printed
+beside the requirement deltas from section 2, so the divergence stays visible
+without being an error.
 
 ### 6. Recorded, not resolved
 
@@ -318,6 +365,15 @@ existing immutable ruleset version" exists to prevent.
   freely by hand in that region.
 - Two of the eight M1 rules ship at `rule_version` `0.2.0` while six ship at
   `0.1.0`, which looks inconsistent without this ADR.
+- The snapshot and the ruleset now show different `rule_version` values for the
+  same two `rule_id`s from the day both files exist, and nothing rejects that.
+  A reader who does not know the snapshot's version is frozen metadata will
+  read the delta line as a bug. The delta is printed for exactly that reason.
+- One published requirement, `content-signals.syntax`, is retired on day one, so
+  `retired_requirements` is exercised immediately rather than being a facility
+  nobody uses. A future contributor now has a supported way to drop a published
+  requirement, and the only thing standing between that and silent erosion is
+  that it needs an accepted ADR to name.
 - The category taxonomy stays broken through M1, so `@category:` selectors are
   documented as unstable until it is fixed.
 
@@ -326,11 +382,16 @@ existing immutable ruleset version" exists to prevent.
 - `specs/README.md` must describe all three files and their joins.
 - `specs/sources.schema.json` and `specs/ruleset.schema.json` are written in M1;
   `rule.schema.json` keeps its 22-entry constraints.
-- The validation script checks that a `rule_id` in the snapshot and the ruleset
-  carries the same `rule_version`, that no ruleset entry declares a `compat`
-  pass heuristic, that every `source_refs` id resolves in the ledger, and that
-  the ruleset's requirement ids are a superset of the snapshot's per shared
-  rule.
+- The validation script reports the snapshot and ruleset `rule_version` for a
+  shared `rule_id` as a listed delta and never as an equality error, checks that
+  no ruleset entry declares a `compat` pass heuristic, checks that every
+  `source_refs` id resolves in the ledger, and checks that every snapshot
+  requirement id for a shared rule is either declared by the ruleset or carried
+  in that rule's `retired_requirements` with an `adr` and a `reason`.
+- A validator test asserts that the M1 data is accepted: the snapshot holds
+  `0.1.0` for `web.policy.ai-crawler` and `web.policy.content-signals` while the
+  ruleset holds `0.2.0`, and `content-signals.syntax` is retired rather than
+  declared. This is the case the first revision's equality invariant rejected.
 - A CI check regenerates the `PROJECT_STATUS.md` per-rule table and fails on a
   difference.
 - `@category:` selector documentation must warn that the taxonomy is unresolved.

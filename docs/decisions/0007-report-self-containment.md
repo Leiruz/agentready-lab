@@ -14,9 +14,10 @@ remediation summary". Neither is satisfiable from a report as currently modeled.
 **Sources are unresolvable.** `RuleFinding.sourceRefs` carries
 `{ sourceId, section? }`, where `sourceId` keys into the `sources` array of
 `specs/checks.v0.yaml`. `CanonicalScanReportV1` has no top-level `sources` array
-and does not carry `registry_version`. A consumer holding only the JSON report
-sees `{"sourceId": "rfc9309"}` with no title, URL, status, version, or
-verification date, and no way to know which registry snapshot to resolve it in.
+and carries no source-ledger or snapshot version. A consumer holding only the
+JSON report sees `{"sourceId": "rfc9309"}` with no title, URL, status, version,
+or verification date, and no way to know which pinned source set to resolve it
+in.
 
 **Remediation is modeled nowhere.** It is required by G-2, by FR-6, and by the
 section 24 release definition of done, and it appears in
@@ -29,7 +30,8 @@ level, so remediation cannot be added to a check without a schema change, and
 
 ### 1. The canonical report carries the sources it cites
 
-`CanonicalScanReportV1` gains two fields:
+`CanonicalScanReportV1` gains a cited-source array and names its version axes
+explicitly:
 
 ```ts
 export interface ReportSource {
@@ -42,17 +44,57 @@ export interface ReportSource {
   readonly verifiedAt: string;
 }
 
+export interface ExternalSnapshotRef {
+  /** `snapshot.captured_at` of `specs/checks.v0.yaml`. */
+  readonly capturedAt: string;
+  /** `schema_version` of that file. */
+  readonly schemaVersion: string;
+}
+
 export interface CanonicalScanReportV1 {
-  // ... existing fields ...
-  readonly registryVersion: string;
+  // ... existing fields, including `ruleset: { id, version, digest }` ...
+  /** `source_ledger_version` of `specs/sources.v0.yaml`. */
+  readonly sourceLedgerVersion: string;
+  /** Present in `compat` mode and absent in every other mode. */
+  readonly externalSnapshot?: ExternalSnapshotRef;
   readonly sources: readonly ReportSource[];
 }
 ```
 
-`sources` is projected from the registry at build time and filtered to the
+`sources` is projected from the source ledger at build time and filtered to the
 sources actually cited by a finding in that report, sorted by `id`.
-`registryVersion` is the pinned `registry_version` of the ruleset artifact, not
-a value read at scan time.
+
+#### The first revision named a field no artifact has
+
+That revision added `readonly registryVersion: string` and said it was "the
+pinned `registry_version` of the ruleset artifact". Adversarial review on
+2026-08-29 showed that after ADR-0008 nothing carries `registry_version`:
+`specs/checks.v0.yaml` loses that top-level field in the section 2 migration,
+and the two artifacts it moves to carry `ruleset_version` and
+`source_ledger_version` instead. `registryVersion` is removed rather than
+repointed, because it named a merged axis that ADR-0008 exists to split.
+
+The three axes a report must identify are therefore:
+
+| Axis | Where it is in the report |
+| --- | --- |
+| `ruleset_version` | the existing `ruleset.version` field |
+| `source_ledger_version` | the new top-level `sourceLedgerVersion` |
+| `snapshot.captured_at` | `externalSnapshot`, in `compat` mode only |
+
+A second top-level `rulesetVersion` field is deliberately **not** added.
+`CanonicalScanReportV1` already carries `ruleset: { id, version, digest }`
+(`docs/ARCHITECTURE.md` section 9, and the example in
+`docs/IMPLEMENTATION_SPEC.md` section 13), so a second copy would be two fields
+that must be equal and can only disagree. That is the same reasoning ADR-0002
+used to take `status` away from rules and ADR-0003 used to keep `retryable` off
+the renderer, and it should not be broken here for symmetry with a field name.
+
+`externalSnapshot` is required in `compat` mode because a compatibility verdict
+is a claim about a dated external inventory, and a reader holding only the JSON
+must be able to see which one. It is absent in `spec` and `interop` mode, where
+the snapshot decided nothing and asserting it would imply otherwise. A `compat`
+report without it, or a non-`compat` report with it, is a contract-test failure.
 
 Filtering to cited sources keeps the report bounded. The registry holds roughly
 thirty sources; embedding all of them in every report would put the same
@@ -195,8 +237,11 @@ one command away.
 
 - A JSON report identifies its sources, their status, pinned version, and
   verification date without any other file.
-- `registryVersion` tells which snapshot a historical report was produced
-  against, which G-3 needs to make draft drift visible.
+- `sourceLedgerVersion` tells which pinned source set a historical report was
+  produced against, and in `compat` mode `externalSnapshot` tells which dated
+  external inventory decided the compatibility verdicts. G-3 needs both to make
+  draft drift visible, and the first revision's single merged field could show
+  neither.
 - The definition-of-done item on remediation becomes a failing build rather than
   a missed checklist line.
 - The frozen 22-check registry schema needs no generation bump.
@@ -209,8 +254,11 @@ one command away.
   without prose written and reviewed by a human.
 - The report grows by the cited-source block and one summary per non-passing
   finding. Small for an eight-rule scan, but not nothing.
-- `remediation_version` is a fourth version axis alongside `schema_version`,
-  `registry_version`, and `ruleset_version`, to be pinned in CI like the others.
+- `remediation_version` is a fifth version axis alongside `schema_version`,
+  `ruleset_version`, `source_ledger_version`, and the snapshot's
+  `captured_at`, to be pinned in CI like the others. Four of the five now reach
+  the report, which is more surface than a single `registry_version` would have
+  been and is the price of ADR-0008 splitting the authorities.
 
 ## Alternatives considered
 
@@ -250,8 +298,8 @@ contents depend on when it was rendered.
 - A source's pinned version changes in a way that invalidates existing
   remediation text, bumping `remediation_version` and the affected
   `rule_version`.
-- A `1.0.0` report schema is cut, freezing `sources` and `registryVersion` as
-  public contract.
+- A `1.0.0` report schema is cut, freezing `sources`, `sourceLedgerVersion`,
+  and `externalSnapshot` as public contract.
 
 ## Related documents
 

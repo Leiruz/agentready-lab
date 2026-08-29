@@ -56,12 +56,31 @@ depend on the transport and must not, so the transport could not have produced a
 `parse-failure` and the rule package could not have imported the type that
 described one.
 
+### The second revision deferred a correction that costs nothing to make
+
+The second revision separated the four resource budgets and then claimed, in
+its consequences, that they are "distinguishable from the report alone". Two of
+them were not. `parse-failure` and `parser-budget-exceeded` are distinct
+internal reasons but both project to exactly `parse-failed` at phase `parse`,
+so a document this project refused to finish parsing was indistinguishable from
+a document it parsed and found broken.
+
+The second revision also argued, under "Add public codes for the whole-scan byte
+budget and the deadline", that growing the public enum "is a schema change that
+should happen once, with the report-schema work". Adversarial review on
+2026-08-29 rejected that reasoning for this case and is right: no report has
+shipped, `schemaVersion` `1.0.0` has not been cut, and there is therefore no
+compatibility to preserve. Deferring bought nothing and left the ADR asserting a
+distinguishability property it did not have. Section 3 adds the code now.
+
 ## Decision
 
 ### 1. Two enumerations exist, and the internal one has three owners
 
-**Public**: the 14 `PublicObservationError.code` members, unchanged. They are
-the only error vocabulary in the canonical report and in every reporter.
+**Public**: 15 `PublicObservationError.code` members, the 14 declared in
+`ARCHITECTURE.md` section 9 and `IMPLEMENTATION_SPEC.md` section 13 plus
+`resource-budget-exhausted`, which section 4 adds. They are the only error
+vocabulary in the canonical report and in every reporter.
 
 **Internal**: a single `ObservationFailure` union declared in `packages/core`,
 built from three owner-specific unions. It never appears in a report.
@@ -122,6 +141,7 @@ export type PublicErrorCode =
   | "request-timeout"
   | "redirect-limit"
   | "request-budget-exhausted"
+  | "resource-budget-exhausted"
   | "response-limit"
   | "decode-failed"
   | "parse-failed"
@@ -208,7 +228,7 @@ escaping as a raw exception.
 | `decompression-failure` | transport | `decode` | `decode-failed` | no |
 | `scan-byte-budget-exceeded` | transport | `body`, `decode` | `request-budget-exhausted` | no |
 | `parse-failure` | rules | `parse` | `parse-failed` | no |
-| `parser-budget-exceeded` | rules | `parse` | `parse-failed` | no |
+| `parser-budget-exceeded` | rules | `parse` | `resource-budget-exhausted` | no |
 | `request-slot-budget-exceeded` | core | `policy` | `request-budget-exhausted` | no |
 | `scan-deadline-exceeded` | core | `runtime` | `aborted` | no |
 | `caller-cancelled` | core | `runtime` | `aborted` | no |
@@ -228,7 +248,7 @@ The four budgets are now separable from the report alone:
 | request slots for the scan | `request-budget-exhausted` | `policy` |
 | whole-scan encoded or decoded bytes | `request-budget-exhausted` | `body` or `decode` |
 | this response's byte cap | `response-limit` | `body` |
-| parser depth, nodes, or time | `parse-failed` | `parse` |
+| parser depth, nodes, or time | `resource-budget-exhausted` | `parse` |
 | per-request elapsed deadline | `request-timeout` | `request`, `body`, `decode` |
 | whole-scan elapsed deadline | `aborted` | `runtime` |
 
@@ -239,6 +259,23 @@ remaining bytes, and the transport reports `response-too-large` or
 `scan-byte-budget-exceeded` according to which of the two bound. ADR-0005's
 serial execution is what makes "the scan's remaining bytes" a well-defined
 number at dispatch time.
+
+`resource-budget-exhausted` is the fifteenth public code and the only addition
+this decision makes to the published enum. It means: a bounded internal
+processing budget stopped this observation, and the target's bytes are not
+implicated. Its only producer today is `parser-budget-exceeded` at phase
+`parse`, which is what makes parser exhaustion distinguishable from
+`parse-failed`, an ordinary broken document at the same phase.
+
+The name is general rather than `parser-budget-exhausted` on purpose. The
+`1.0.0` cut still has to decide whether the whole-scan byte budget and the
+whole-scan deadline deserve their own codes, and this is where they land if it
+does, without a sixteenth and seventeenth member. Until then the honest
+statement is that one budget uses it, `phase` identifies which, and the two
+`request-budget-exhausted` rows keep a code whose name says "request" while its
+`body` and `decode` phases mean bytes. That inaccuracy is now visible next to a
+better-named neighbour, which is a fair description of an enum caught mid-fix
+rather than a defence of it.
 
 `timeout` remains the one internal code whose projection depends on its phase.
 That is why `phase` is mandatory on every variant and why the projection is a
@@ -311,8 +348,9 @@ export function toPublicError(
     case "scan-byte-budget-exceeded":
       return blocked("request-budget-exhausted", reason.phase);
     case "parse-failure":
-    case "parser-budget-exceeded":
       return blocked("parse-failed", "parse");
+    case "parser-budget-exceeded":
+      return blocked("resource-budget-exhausted", "parse");
     case "request-slot-budget-exceeded":
       return blocked("request-budget-exhausted", "policy");
     case "scan-deadline-exceeded":
@@ -385,8 +423,10 @@ no consumer: it is neither the boundary vocabulary nor the report vocabulary.
 - The four resource budgets are distinguishable from the report alone.
 - Parsers can raise a typed failure without `rules-standard` importing
   `transport-node`.
-- The section 13 contract-test requirement becomes writable: 14 public codes,
+- The section 13 contract-test requirement becomes writable: 15 public codes,
   25 mapping rows including the `timeout` split.
+- A parser that ran out of budget is distinguishable from a parser that read a
+  broken document, which is what the second revision claimed and did not have.
 - Reporters render errors without knowing anything about the transport.
 
 ### Costs
@@ -396,10 +436,15 @@ no consumer: it is neither the boundary vocabulary nor the report vocabulary.
   `--debug`.
 - `malformed-http` and `decompression-failure` collapse into `decode-failed`,
   separated only by `phase`.
-- `request-budget-exhausted` now carries two different budgets, separated by
+- `request-budget-exhausted` still carries two different budgets, separated by
   `phase`. The code name says "request" while the `body` and `decode` phases
-  mean bytes, which is a naming inaccuracy accepted in order to leave the
-  published 14-member public enum alone.
+  mean bytes. The second revision accepted that inaccuracy in order to leave the
+  published enum alone; that argument no longer holds now that the enum has
+  grown by one, and the inaccuracy is retained only because moving those two
+  rows is a separate decision the `1.0.0` cut should make once.
+- The public enum is 15 members, so `ARCHITECTURE.md` section 9 and
+  `IMPLEMENTATION_SPEC.md` section 13 both declare a stale 14-member list until
+  they are reconciled.
 - `caller-cancelled` and `scan-deadline-exceeded` are both `aborted`. A reader
   cannot tell a user's Ctrl+C from a 30-second deadline without `--debug`. The
   distinction `TEST_STRATEGY.md` section 7 actually requires, cancellation
@@ -412,6 +457,8 @@ no consumer: it is neither the boundary vocabulary nor the report vocabulary.
 ### Implementation constraints
 
 - `ARCHITECTURE.md` section 8 must be rewritten to reference this ADR.
+- `ARCHITECTURE.md` section 9 and `IMPLEMENTATION_SPEC.md` section 13 must both
+  grow `PublicObservationError.code` from 14 members to 15.
 - `THREAT_MODEL.md` section 26 keeps its example list, and a note must record
   that the executable enumeration is this ADR's, not that block's.
 - Every `TransportReason`, `ParserReason`, and `EngineReason` variant carries
@@ -439,11 +486,30 @@ change.
 
 ### Add public codes for the whole-scan byte budget and the deadline
 
-Rejected for M1. It is the more accurate design and it is recorded as a revisit
-condition, but the 14-member public enum is declared in two documents and
-carried in the report schema, and `phase` already separates the cases for a
-reader. Growing the public enum is a schema change that should happen once, with
-the report-schema work, rather than twice.
+Still deferred, and the reasoning given by the second revision is corrected
+here. That revision rejected all enum growth for M1 because "the 14-member
+public enum is declared in two documents and carried in the report schema", and
+called growing it "a schema change that should happen once". No report has
+shipped and `schemaVersion` `1.0.0` has not been cut, so there was no
+compatibility to protect and that argument was wrong. Section 4 therefore adds
+`resource-budget-exhausted` now.
+
+These two budgets stay deferred on a different ground. Unlike parser
+exhaustion, neither is currently ambiguous: the whole-scan byte budget is
+`request-budget-exhausted` at phase `body` or `decode`, the whole-scan deadline
+is `aborted` at phase `runtime`, and no other condition produces either pair. A
+reader can already tell them apart. The remaining question is naming accuracy,
+not distinguishability, and `resource-budget-exhausted` now exists as the
+landing place if the `1.0.0` cut decides to move them.
+
+### Name the new code `parser-budget-exhausted`
+
+Rejected. It is more precise about today's single producer and it forecloses
+nothing except the `1.0.0` remapping that section 4 describes, which is exactly
+what it would foreclose: a second budget moving onto it would then carry a
+misleading name, which is the defect `request-budget-exhausted` already has. One
+generically named code plus a mandatory `phase` is the shape that survives the
+remapping.
 
 ### Reconcile the 10-member enum into the public one
 
@@ -469,8 +535,10 @@ twice invites the two answers to diverge.
 ## Revisit conditions
 
 - The report schema is cut at `1.0.0`, which is the moment to decide whether
-  the whole-scan byte budget and the whole-scan deadline earn public codes of
-  their own.
+  the whole-scan byte budget and the whole-scan deadline move onto
+  `resource-budget-exhausted`, keep `request-budget-exhausted` and `aborted`, or
+  earn codes of their own. Whatever it decides, it should also decide whether
+  `request-budget-exhausted` keeps a name that means bytes at two phases.
 - A hosted profile needs a coarser public vocabulary for anonymous callers.
 - The classifier gains a block reason a user cannot act on without more detail.
 - Retries are introduced, giving `retryable` behavioral meaning.

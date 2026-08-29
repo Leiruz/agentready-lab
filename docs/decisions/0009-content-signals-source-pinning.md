@@ -79,6 +79,24 @@ requirement alone, so `specs/checks.v0.yaml` still instructed an implementer to
 the ADR stated that no value vocabulary exists. The requirement and the decision
 that supposedly narrowed it contradicted each other in the same repository.
 
+### The second revision looked for a normative hook and there is not one
+
+The second revision accepted the criticism above and then did the same thing
+one layer down. It moved `content-signals.syntax` off the invented grammar and
+onto RFC 9309, and asserted that a malformed `Content-Signal` record is
+"a violation of it by the publisher". Adversarial review on 2026-08-29 rejected
+that too, and checking RFC 9309 directly shows the review is right. The text of
+section 2.2.4 is quoted in section 3 below.
+
+This is worth stating plainly rather than absorbing into a rewrite, because it
+is now two attempts. The first looked for a grammar and found a compatibility
+heuristic wearing one. The second looked for a normative source that could
+carry a publisher failure and found an RFC section that explicitly declines to
+define one. There is no normative hook for a Content Signals syntax failure in
+any source this project has pinned. The honest record is that the search was
+made twice and came back empty both times, so the assertion is retired rather
+than re-derived a third time.
+
 ## Decision
 
 ### 1. Do not invent a grammar
@@ -109,28 +127,48 @@ correct home for the token list.
 
 The set has no authority in `spec` mode beyond section 4's advisory use.
 
-### 3. `content-signals.syntax` is rewritten to rest only on RFC 9309
+### 3. `content-signals.syntax` is retired, and nothing normative replaces it
 
-The requirement text changes from:
+The requirement is removed. It is not rewritten, not demoted, and not carried
+forward under another id. After this decision **no assertion in this rule can
+produce `spec: fail`**: the rule is advisory and compatibility only.
 
-> Parse only the pinned Content Signals vocabulary and allowed values,
-> preserving the REP group context.
+RFC 9309 section 2.2's ABNF defines exactly three record types, the
+`startgroupline` (`user-agent`) and the two `rule` forms (`allow` and
+`disallow`). A `Content-Signal` line is none of them. Section 2.2.4, "Other
+Records", is the only place the RFC addresses such a line:
 
-to:
+> Crawlers MAY interpret other records that are not part of the robots.txt
+> protocol. [...] Crawlers MAY be lenient when interpreting other records.
+> [...] Parsing of other records MUST NOT interfere with the parsing of
+> explicitly defined records in Section 2.
 
-> Parse a `Content-Signal` line as a syntactically valid RFC 9309 record and
-> preserve its group association, reporting a line that is not a valid record
-> as a violation. Make no claim about which tokens or values are permitted,
-> because no pinned source defines either.
+Three things follow, and each one independently removes a way the assertion
+could have survived.
 
-This keeps the assertion `normative`, because RFC 9309 is a pinned normative
-source that does define robots.txt line and group syntax, and a malformed record
-is a violation of it by the publisher. It removes every clause the sources do
-not support.
+1. The RFC defines no syntax for an extension record. There is no
+   well-formedness condition for a `Content-Signal` line to fail, so
+   "malformed" has no pinned meaning here.
+2. It explicitly permits leniency. Strictness cannot be derived from a source
+   that grants a `MAY` to be lenient.
+3. Its one `MUST` is addressed to the crawler, not to the publisher. It
+   constrains this scanner's parser. A publisher cannot violate it, so it
+   cannot produce a verdict about a target under any requirement class.
 
-The renamed scope is narrow and it should read that way in `rules explain`: this
-assertion checks that a line is well-formed REP and sits in the group the
-publisher intended, and nothing else.
+The non-interference `MUST` is a real obligation and it is this project's own.
+It is discharged where obligations on our own code belong: the robots parser
+must produce identical group selection and allow/disallow results for a
+`robots.txt` with its extension records present and with them stripped, proven
+by a parser unit test. It is not reported as an assertion against a target, and
+a rule may not declare an assertion whose subject is this scanner.
+
+Because the rule now validates no syntax, the ruleset entry's
+`spec.claim_scope` changes from `syntax-validation` to `detection-only`.
+`specs/checks.v0.yaml` keeps `syntax-validation` unedited, as the historical
+record of what was captured on the snapshot date.
+
+`rules explain` for this rule must therefore say that the project validates no
+Content Signals syntax at all, and why.
 
 ### 4. Unrecognized vocabulary is advisory, not a failure
 
@@ -255,6 +293,9 @@ sounds plausible; a byte count and an HTTP status are checkable.
 
 - The rule ships in M1 without a fabricated source and without a compatibility
   observation deciding a specification verdict.
+- No source is stretched to carry a publisher failure. The rule's `spec`
+  verdicts are exactly as strong as its pinned sources, which is not very, and
+  the report says so.
 - The requirement text and the decision that narrows it now agree, which they
   did not before.
 - Every finding names the expired draft as expired, so a reader cannot mistake
@@ -265,19 +306,23 @@ sounds plausible; a byte count and an HTTP status are checkable.
 
 ### Costs
 
-- The rule is much weaker than the fixture catalog implied. It produces no
-  `spec: fail` for any Content Signals condition except a malformed REP record.
-  A publisher who writes `ai-train=maybe`, or who declares tokens nobody
-  recognizes, gets a warning and an evidence record.
+- The rule is much weaker than the fixture catalog implied, and weaker again
+  than the second revision left it. It produces no `spec: fail` for any Content
+  Signals condition whatsoever. A publisher who writes `ai-train=maybe`, who
+  declares tokens nobody recognizes, or whose `Content-Signal` line is not a
+  well-formed field at all, gets a warning and an evidence record.
+- The rule loses its only `normative` assertion, so `web.policy.content-signals`
+  becomes the one M1 rule whose entire `spec` output is `recommended` and
+  `advisory`. A reader comparing rules will notice, and the answer is that the
+  sources differ, not that the rule is unfinished.
 - Users comparing against IsItAgentReady will see `spec` and `compat` disagree
   on `sig-003` where the first revision had them agree. That is the intended
   behavior and it will look like a regression to anyone expecting parity.
-- `content-signals.syntax` no longer has a fixture that exercises its `fail`
-  path, because none of `sig-001` through `sig-006` serves a malformed REP
-  record. `ROADMAP.md` M1's "Every assertion/finding code has a positive and
-  negative test" is met by a rule unit test over the parser rather than by a
-  protocol fixture. Adding a fixture instead would change the published count of
-  49 protocol cases and needs a maintainer decision.
+- The second revision left an open maintainer question about whether
+  `content-signals.syntax` needed a protocol fixture for its `fail` path, which
+  would have changed the published count of 49 protocol cases. Retiring the
+  assertion closes that question rather than answering it: there is no `fail`
+  path to cover, and the 49-case count is unchanged.
 - `sig-003` and `sig-005` share a `spec` assertion, so the two cases are
   separated by their `compat` verdicts and a finding parameter rather than by
   distinct assertion ids.
@@ -288,15 +333,17 @@ sounds plausible; a byte count and an HTTP status are checkable.
 
 - Version bumps are the ones in ADR-0008: `web.policy.content-signals`
   `rule_version`, `ruleset_version`, and `source_ledger_version` all `0.1.0` to
-  `0.2.0`. This decision adds no further bump. The rewritten
-  `content-signals.syntax` text and the new
+  `0.2.0`. This decision adds no further bump. The retirement of
+  `content-signals.syntax` and the new
   `content-signals.unrecognized-vocabulary` assertion land in
   `specs/ruleset.standard.v0.yaml` in the same change, alongside ADR-0008's
   `content-signals.conflicting-declaration`.
 - `specs/checks.v0.yaml` is not edited. Its frozen copy of the old
-  `content-signals.syntax` text is historical, and ADR-0008 section 2's superset
-  check must record the rewrite as a listed delta rather than treating it as a
-  dropped requirement.
+  `content-signals.syntax` text is historical. Because the ruleset no longer
+  declares that id at all, the superset check in ADR-0008 section 2 would
+  otherwise read the retirement as a silently dropped requirement, so the
+  ruleset records it in the `retired_requirements` block that ADR-0008 section 2
+  defines, naming this ADR as the reason.
 - `docs/FIXTURE_CATALOG.md` section 10 must be updated with the section 6 table,
   and its sentence "The exact grammar and token set are pinned in the standards
   registry before implementation" must be replaced, because it is the sentence
@@ -308,8 +355,14 @@ sounds plausible; a byte count and an HTTP status are checkable.
 - A contract test asserts every finding message referencing the draft contains
   "expired".
 - A contract test asserts the three-token set appears only in the `compat`
-  assertion and in `content-signals.unrecognized-vocabulary`, and never in the
-  evaluation path of `content-signals.syntax`.
+  assertion and in `content-signals.unrecognized-vocabulary`.
+- A contract test asserts this rule declares no assertion whose
+  `requirementClass` is `normative`, in any mode, so a later contributor cannot
+  reintroduce one without changing a test that names this decision.
+- A parser unit test discharges the RFC 9309 section 2.2.4 non-interference
+  `MUST`: for every robots fixture, group selection and allow/disallow results
+  are identical with extension records present and with them stripped. It is a
+  test of this project's parser and produces no finding.
 
 ## Alternatives considered
 
@@ -320,13 +373,28 @@ compatibility heuristic to decide a specification verdict, which
 `.claude/rules/standards.md` forbids twice, and it left the underlying
 requirement text unchanged and self-contradictory.
 
+### Keep a normative RFC 9309 assertion, scoped to non-interference
+
+Rejected, and this is the closest surviving alternative. RFC 9309 section 2.2.4
+does contain a `MUST`, so the temptation is to keep a normative assertion and
+narrow it to that. It fails because the `MUST` binds the crawler. An assertion
+whose subject is this scanner cannot produce a status about a target, and
+reporting `pass` on it against every target would be a self-certification
+dressed as a conformance result. Section 3 sends it to a parser unit test
+instead.
+
 ### Defer the `spec` assertion entirely and ship `compat` only
 
-Rejected, narrowly, and it was close. It is the most conservative option and it
-would have been correct if the rule had no pinned normative source. It has one:
-RFC 9309 governs the line and group syntax of every `robots.txt` record,
-including this one, so there is a real normative assertion to make. Making it
-and being explicit about how small it is beats making none.
+Rejected, but the reason given by the second revision was wrong and is
+corrected here. That revision rejected it "narrowly" on the grounds that
+"RFC 9309 governs the line and group syntax of every `robots.txt` record,
+including this one, so there is a real normative assertion to make". Section 3
+shows that RFC 9309 governs three record types and explicitly declines to
+govern any other, so there was no such assertion to make. The option is still
+rejected, on a different and smaller ground: the rule keeps four `spec`-mode
+assertions of `recommended` and `advisory` class, which report real, checkable,
+non-verdict-forcing observations. Shipping `compat` only would discard those
+for no gain.
 
 ### Defer the whole rule out of M1
 
@@ -348,9 +416,15 @@ consensus is not a pin. It may be cited as context, labeled expired, per
 
 ### Ship the rule as `detection-only`
 
-Rejected. The registry already declares `syntax-validation`, and RFC 9309 record
-validation genuinely is syntax validation. Downgrading the claim scope removes
-the one thing the rule can honestly assert.
+No longer an alternative: section 3 adopts it, reversing the second revision,
+and this entry is kept so the reversal is visible. That revision rejected it on
+the
+grounds that "RFC 9309 record validation genuinely is syntax validation", which
+depended on the assertion section 3 has now retired. With no syntax assertion
+left, `syntax-validation` would be a claim scope the rule cannot support, so
+the ruleset entry declares `detection-only`. `specs/checks.v0.yaml` keeps
+`syntax-validation` unedited as a historical record of what was captured on the
+snapshot date, and the difference is one of ADR-0008 section 2's listed deltas.
 
 ### Use IsItAgentReady's detection as the grammar
 
@@ -362,8 +436,9 @@ rejection the first revision wrote down and then did not follow.
 
 - `draft-romm-aipref-contentsignals` is revived, adopted by the IETF AIPREF
   working group, or replaced by a draft with a defined grammar. That is the
-  event that would let `content-signals.syntax` grow a vocabulary clause and
-  `sig-003` return to `spec: fail`.
+  event that would give this rule a normative assertion for the first time and
+  let `sig-003` return to `spec: fail`. It would be a new assertion under a new
+  id, not a revival of `content-signals.syntax`, whose retirement stands.
 - The Content Signals community publishes a versioned, retrievable,
   machine-readable grammar or token registry.
 - A recognized standards body defines a value vocabulary or a conflict

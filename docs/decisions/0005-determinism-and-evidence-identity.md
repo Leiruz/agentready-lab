@@ -113,8 +113,7 @@ After configuration validation and rule selection, and before any socket opens:
 1. walk the selected rules in stable registry order;
 2. for each rule, call `plan()` (ADR-0002) and walk the returned requests in
    declaration order;
-3. canonicalize each request into the representation-aware key defined in
-   `ARCHITECTURE.md` section 7;
+3. canonicalize each request into the key defined in section 3;
 4. if the key is already planned, attach to the existing reservation and reserve
    nothing, which is why the shared robots observation costs one slot and not
    three;
@@ -133,7 +132,60 @@ activity can never consume another rule's capacity. A round-two batch larger
 than `roundTwoBudget` is a contract violation and exits 4 (ADR-0002 section 5);
 it is not silently truncated.
 
-### 3. Reserved slots are not evidence identities
+### 3. The canonical request key is defined here, in full
+
+Step 3 of section 2, and the per-round deduplication in section 4, both
+canonicalize a request. The previous revision delegated the algorithm to
+`ARCHITECTURE.md` section 7, and that delegation is withdrawn. Adversarial
+review on 2026-08-29 pointed out that section 7's key names a singular
+"body limit" while `HttpObservationRequest` carries `maxEncodedBytes` **and**
+`maxDecodedBytes` (ADR-0002 section 4), so two requests differing only in one of
+the two safety limits would canonicalize onto the same key and alias. The rule
+that lowered a limit would then be handed the other rule's larger, or truncated,
+response. A deduplication key that can merge
+two different safety postures is a security defect, not a tidiness one, so the
+key belongs where the limits are decided.
+
+The complete key is:
+
+```text
+canonical-request-key =
+    method                  ; "GET" or "HEAD", uppercase
+  + effective URL           ; scheme and host lowercased, default port for the
+                            ;   scheme removed, empty path normalized to "/",
+                            ;   percent-encoding normalized to uppercase hex,
+                            ;   query preserved byte for byte, fragment removed
+  + representation headers  ; every representation-affecting request header:
+                            ;   field name lowercased, entries sorted by name
+                            ;   then by value, optional whitespace trimmed,
+                            ;   repeated fields kept as an ordered value list
+  + redirect policy         ; "follow-same-origin" or "reject"
+  + max redirects           ; the effective integer after ADR-0004 section 9
+  + maxEncodedBytes         ; the effective integer after ADR-0004 section 9
+  + maxDecodedBytes         ; the effective integer after ADR-0004 section 9
+  + network scope           ; "local" or "remote", and the network profile id
+```
+
+For M1 the representation-header set is exactly `accept`, because `accept` is
+the only header a rule can set (`HttpObservationRequest`). The component is
+still modeled as a sorted multi-valued set so that adding a second
+representation-affecting header later cannot create a silent collision, which is
+the same reason `ARCHITECTURE.md` section 7 modeled a request-body digest for
+methods M1 does not permit.
+
+Both byte limits are in the key as **effective** values, after the section 9
+minimum-across-sources rule in ADR-0004. That is what makes them deterministic
+inputs rather than a race between whichever rule was asked first.
+
+Deliberately not in the key: the rule id, the round number, the rule-local
+request id, the evidence id, and the rule's declaration order. None of them
+describes the request, and including any of them would defeat the cross-rule
+deduplication that `TEST_STRATEGY.md` section 6 requires for the shared robots
+observation.
+
+`ARCHITECTURE.md` section 7 must be replaced by a reference to this section.
+
+### 4. Reserved slots are not evidence identities
 
 These are separate numbering schemes and conflating them was the second defect.
 
@@ -153,13 +205,18 @@ So round one's canonical requests take `ev-001` upward, and round two's
 continue from wherever round one stopped. Nothing is renumbered, because a
 round's plan is frozen before the next round's rules run.
 
-Identity, deduplication, and aliasing follow ADR-0002 section 8 and are restated
-here because the first revision of this ADR omitted them:
+Identity, deduplication, and aliasing follow ADR-0002 section 8 and section 3
+above, and are restated here because the first revision of this ADR omitted
+them:
 
-- `ObservationRequest.id` is rule-local and unique within one rule and one
-  round. A duplicate within that scope is a contract violation and exits 4.
+- `ObservationRequest.id` is rule-local and unique within one rule for the
+  entire scan, across both rounds. A duplicate anywhere in that rule's scan is a
+  contract violation and exits 4. The first revision of ADR-0002 scoped
+  uniqueness to one round and keyed ids by `(ruleId, round, id)`, which left a
+  bare id in `context.observation(id)` and in `AssertionOutcome.observationRefs`
+  with two possible answers. That is corrected in ADR-0002 section 8.
 - Two rules may use the same rule-local id for different requests. Ids are
-  keyed by `(ruleId, round, id)` and never collide across rules.
+  keyed by `(ruleId, id)` and never collide across rules.
 - Every rule-local id that canonicalizes onto a shared request becomes an alias
   for it. `context.observation(id)` resolves through the alias and hands both
   rules the same frozen observation.
@@ -168,7 +225,7 @@ here because the first revision of this ADR omitted them:
   deduplicating and sorting. Two rules citing one observation cite one ID.
 - A rule-local id naming no request in a completed round exits 4.
 
-### 4. Evidence IDs are sequential, in plan order
+### 5. Evidence IDs are sequential, in plan order
 
 Evidence IDs are `ev-` followed by a three-digit zero-padded decimal:
 `ev-001`, `ev-002`, and so on. The planner rejects a configuration whose
@@ -191,7 +248,7 @@ stable for the same sanitized observation". Under this decision they are stable
 for the same plan, which is the property determinism actually requires. That
 test's wording must be updated with the implementation.
 
-### 5. Exit code 3 is deterministic as a consequence
+### 6. Exit code 3 is deterministic as a consequence
 
 Exit code 3 is reserved for a whole-scan abort: the scan-wide elapsed deadline,
 or a security policy that stops the run. Denying an individual reservation
@@ -208,17 +265,41 @@ aborts on it reports internal reason `scan-deadline-exceeded`, public code
 aborted report as either side of a comparison. An aborted scan is not a
 measurement.
 
-### 6. The determinism tests
+### 7. The determinism tests
 
 `ROADMAP.md` M1's criterion is written in terms of promise completion order.
 That is necessary and not sufficient, because the byte budgets are crossed by
 chunks, not by promises. The suite must contain all four of these:
 
+Before them, a correction. The previous revision required, as test 2, that
+"observations resolve in reverse plan order and the canonical JSON is
+byte-identical", in the same section that mandated a strictly serial dispatcher.
+Adversarial review on 2026-08-29 pointed out that those cannot both hold, and it
+is right, twice over. A later observation cannot settle before it is dispatched,
+and under section 1 it is not dispatched until the earlier one has settled, so
+the required ordering is unreachable by construction. Rules are synchronous
+under ADR-0002 as well, so there is no rule-facing promise to reorder either.
+The requirement was contradictory and is withdrawn rather than weakened.
+
+What it was reaching for survives in test 2 below. Completion **order** is fixed
+by the dispatcher, so the free variable is completion **latency**, and permuting
+that is a test that can actually be written and can actually fail. `ROADMAP.md`
+M1's checkbox is therefore satisfied structurally by ADR-0002 section 3, which
+makes response arrival order unobservable to rule code, and verified by the
+latency permutations in test 2 and the segmentation permutations in test 3. The
+checkbox's wording names a mechanism this design does not have and must be
+reconciled with it.
+
 1. **Serial execution is enforced, not intended.** A transport wrapper throws if
    a second dispatch begins before the previous observation has completed. This
    is what stops `maxConcurrency` from being reintroduced by accident.
-2. **Reversed promise completion.** Observations resolve in reverse plan order
-   and the canonical JSON is byte-identical.
+2. **Dispatch order is plan order, and latency does not move it.** The transport
+   wrapper records a `(dispatched, settled)` sequence, and the test asserts that
+   request N+1 is not dispatched before request N settles, for settlements of
+   every kind: a response, a transport error, a denied reservation, and a
+   timeout. The same plan is then replayed with several per-response latency
+   profiles, including one that is the reverse of another, and the canonical
+   JSON is byte-identical across all of them.
 3. **Reversed and re-segmented chunk arrival.** Each body is delivered in
    several segmentations, including one where the byte that crosses a whole-scan
    threshold arrives alone as the final chunk and one where it arrives inside
@@ -264,8 +345,9 @@ needs cross-run identity, and cross-run identity is already available through
 
 ### Positive
 
-- Neither response arrival order nor chunk arrival order can change the
-  canonical report, which is the M1 acceptance criterion and more.
+- Neither response latency nor chunk arrival order can change the canonical
+  report, and response arrival order is not a variable at all, which is the M1
+  acceptance criterion and more.
 - Every shared budget, request slots and both byte budgets, is deterministic
   without adding a per-request quota field.
 - Exit code 3 has one meaning and is reproducible.
@@ -299,9 +381,17 @@ needs cross-run identity, and cross-run identity is already available through
 
 - `ARCHITECTURE.md` section 10's `"maxConcurrency": 2` example becomes `1`, and
   section 5's serial-evaluation statement is kept rather than removed.
+- `ARCHITECTURE.md` section 7's request cache key is replaced by a reference to
+  section 3 here, because its singular "body limit" component is the defect.
+- `TEST_STRATEGY.md` section 7's "probes differing by `Accept`, redirect policy,
+  body limit, or network profile do not deduplicate" gains the second byte
+  limit, and its "result order is unchanged when observations resolve in a
+  different order" is restated as the section 7 test 2 assertion.
+- `ROADMAP.md` M1's "Reordering promise completion does not change canonical
+  JSON" is restated so that it names a mechanism this design has.
 - The configuration schema rejects `maxConcurrency` greater than 1 with exit 2
   and a message naming this ADR.
-- The core engine test suite gains the four cases in section 6.
+- The core engine test suite gains the four cases in section 7.
 - `report diff` gains a test proving that an evidence-ID shift with unchanged
   content produces no diff entry.
 - A test asserts that two rules requesting the identical canonical observation

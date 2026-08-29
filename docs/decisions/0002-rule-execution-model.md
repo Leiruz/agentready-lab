@@ -228,7 +228,7 @@ export type ObservationTarget =
 
 export interface HttpObservationRequest {
   readonly kind: "http";
-  /** Unique within one rule and one round. Never an evidence id. */
+  /** Unique within one rule for the whole scan. Never an evidence id. */
   readonly id: string;
   readonly method: "GET" | "HEAD";
   readonly target: ObservationTarget;
@@ -348,12 +348,11 @@ export interface AssertionOutcome {
   /** A versioned assertion id declared by this rule for the active mode. */
   readonly assertion: string;
   readonly kind: OutcomeKind;
-  /** Bounded typed parameters for the static template. Never free prose. */
+  /**
+   * Bounded typed parameters for the static template. Never free prose, and
+   * validated against the assertion's declared parameter schema (section 6).
+   */
   readonly params: Readonly<Record<string, FindingParam>>;
-  readonly sourceRefs: readonly Readonly<{
-    sourceId: string;
-    section?: string;
-  }>[];
   /** Rule-local observation ids. The core rewrites these to evidence ids. */
   readonly observationRefs: readonly string[];
 }
@@ -378,10 +377,33 @@ export interface RuleSource {
   readonly verifiedAt: string;
 }
 
+export type FindingParamKind = FindingParam["kind"];
+
+export interface ParamSpec {
+  readonly kind: FindingParamKind;
+  /** A required parameter absent from an outcome is a contract violation. */
+  readonly required: boolean;
+  /**
+   * Closed value set for this parameter. Absent means the kind's grammar is
+   * the only constraint. A parameter whose values are drawn from a pinned
+   * vocabulary declares that vocabulary here.
+   */
+  readonly allowedValues?: readonly string[];
+}
+
 export interface AssertionDeclaration {
   readonly id: string;
   readonly mode: InterpretationMode;
   readonly requirementClass: RequirementClass;
+  /** The only sources a finding for this assertion may cite. */
+  readonly sourceRefs: readonly Readonly<{
+    sourceId: string;
+    section?: string;
+  }>[];
+  /** Every parameter this assertion's templates may reference. */
+  readonly params: Readonly<Record<string, ParamSpec>>;
+  /** True only where the ruleset explicitly authorizes a bounded excerpt. */
+  readonly excerptAuthorized: boolean;
 }
 
 export interface RuleMetadata {
@@ -499,9 +521,12 @@ const RULE_STATUS_PRECEDENCE = [
 
 export function deriveRuleStatus(statuses: readonly RuleStatus[]): RuleStatus {
   if (statuses.length === 0) {
-    return "not-applicable";
+    throw new RuleContractViolation("an invoked rule returned no outcomes");
   }
-  if (statuses.length > 1 && statuses.includes("not-applicable")) {
+  const inapplicable = statuses.filter(
+    (status) => status === "not-applicable",
+  ).length;
+  if (inapplicable !== 0 && inapplicable !== statuses.length) {
     throw new RuleContractViolation(
       "not-applicable cannot coexist with an evaluated finding",
     );
@@ -514,6 +539,53 @@ export function deriveRuleStatus(statuses: readonly RuleStatus[]): RuleStatus {
   throw new RuleContractViolation("unknown finding status");
 }
 ```
+
+#### The first revision of this function was wrong in both directions
+
+It returned `not-applicable` for an empty status array and threw whenever the
+array was longer than one and contained a `not-applicable`. Adversarial review
+on 2026-08-29 rejected both branches and was right about both.
+
+**Multiple inapplicable findings were rejected.** Every `not-present` outcome
+maps to `not-applicable`, and a rule with several assertions over one absent
+mechanism produces several of them at once. `web.policy.content-signals` has
+four `spec` assertions after ADR-0008 and ADR-0009, and fixture `sig-006` makes
+all four inapplicable together by serving no declaration at all. The old
+condition turned the catalog's own expected result into an exit-4 crash. The
+test is now whether the set is **mixed**, not how long it is.
+
+**A silent rule produced a verdict.** Zero outcomes returned `not-applicable`,
+which is a status, from a rule that reported nothing. A rule that fell through
+its own branches, or that lost an outcome to a typo in an assertion id, was
+indistinguishable in the report from a rule that correctly found nothing to
+check. That is now an enumerated contract violation and exits 4.
+
+`deriveRuleStatus` runs only for a rule the engine actually invoked. A rule the
+core resolved before `plan()`, because its runtime is unavailable or because
+`commerce-endpoint-required` had no endpoint, never reaches it and is not
+covered by the zero-outcome violation.
+
+#### `not-present` describes the mechanism, not one condition inside it
+
+The mixture check is only coherent if `not-present` means one thing, so this
+decision fixes what it means: **the mechanism this rule is about is not
+deployed on the target.** It is a property of the observation set, so every
+assertion of the rule sees the same answer, and a rule's outcome set is
+therefore either entirely `not-present` or contains none at all.
+
+An assertion whose specific condition never arises inside a mechanism that *is*
+deployed reports `satisfied`, because the obligation is met, or `indeterminate`
+where the rule could not tell. `content-signals.conflicting-declaration` on a
+declaration with no repeated token is `satisfied`, not `not-present`. This is
+what ADR-0004 section 2 means by absence being decided per assertion: `lnk-006`
+has no `Link` field at all, so the mechanism is absent and every `Link`
+assertion is `not-present` together.
+
+Every assertion the rule declares for the active mode must carry exactly one
+outcome. Combined with the rule above, that makes the rule-level applicability
+result core-owned and checkable: a rule cannot become `not-applicable` by
+staying quiet, and it cannot become `pass` by omitting the assertion it would
+have failed.
 
 This is what makes "only a violated applicable normative requirement is `fail`"
 enforceable. Under the previous design it was a rule-author convention.
@@ -533,6 +605,9 @@ Each of the following is a contract violation and exits 4:
 - an outcome naming an assertion the rule does not declare, or declares for a
   different mode;
 - more than one outcome for the same assertion in one run;
+- an invoked rule returning zero outcomes;
+- an assertion the rule declares for the active mode with no outcome;
+- an outcome set mixing `not-present` with any evaluated outcome kind;
 - an outcome kind outside the four above, which the compiler catches for
   in-repo rules and the ruleset validator catches for a manifest read from
   disk;
@@ -542,7 +617,17 @@ Each of the following is a contract violation and exits 4:
 - a rule whose `applicability` is `commerce-endpoint-required` returning any
   outcome when no endpoint was configured; the core resolves that rule to
   `not-applicable` before `plan()` and never calls it;
-- a round-two batch larger than `metadata.roundTwoBudget`.
+- a round-two batch larger than `metadata.roundTwoBudget`;
+- a parameter the assertion does not declare, a parameter of the wrong kind, a
+  parameter value failing its kind's grammar or its declared allowlist, a
+  missing required parameter, or an `excerpt` parameter on an assertion whose
+  declaration does not authorize one (section 6);
+- a rule-local request id reused anywhere in that rule's scan (section 8);
+- a memo value that is not acyclic plain data with an approved prototype
+  (section 11).
+
+The first three of these replace a silent default. A rule that returns nothing,
+or that omits one assertion, previously produced a plausible-looking report.
 
 Whole-scan budget exhaustion is not a contract violation. It materializes as an
 error observation (ADR-0005) and normally yields `indeterminate`.
@@ -617,6 +702,133 @@ cannot interpolate a hostname, a header value, a redirect location, a body
 excerpt it chose itself, or an exception. Those are the four routes by which
 target-controlled bytes reached the previous design's report.
 
+#### A static template alone does not bound what fills its holes
+
+The previous revision stopped there, and adversarial review on 2026-08-29 was
+right that stopping there is not enough. Two gaps were left open.
+
+**Any string could enter any typed slot.** Seven of the eight `FindingParam`
+variants carry a `string`, `sanitizeParam` only strips control characters and
+truncates, and the assertion did not say which parameters it takes. A rule
+holding a bounded but target-controlled body could put an arbitrary 128
+characters into a `token` slot, and a template reading "declared token {token}"
+would render it. `THREAT_MODEL.md` sections 3.5 and 20.1 permit only the
+evidence needed to explain an assertion, and 27.6 requires that a marker placed
+in a header, a query, or a body never reaches a report. Truncation is not that
+control.
+
+**Rules chose their own citations.** `AssertionOutcome` carried `sourceRefs`, so
+a rule could cite any source in the ledger for any assertion, including citing
+RFC 9309 for something RFC 9309 does not say. That is precisely the failure
+ADR-0009 records twice for Content Signals, and no type prevented it.
+
+#### Each assertion declares its sources and its parameters
+
+`AssertionDeclaration` now carries `sourceRefs`, `params`, and
+`excerptAuthorized` (section 4), all read from the pinned ruleset. Two rules
+follow.
+
+**Citations are derived, never supplied.** `RuleFinding.sourceRefs` is copied
+from the declaration of the assertion the outcome names, and from nowhere else.
+A rule cannot cite a source, cannot add a section pointer, and cannot cite a
+source the assertion does not rest on. `AssertionOutcome.sourceRefs` is removed
+from the type, so this is not a validation the core performs but a value a rule
+can no longer produce.
+
+**Parameters are validated per assertion, before rendering.** Name, kind,
+grammar, and allowlist are all checked. `excerpt` is reserved: an assertion may
+carry one only where the ruleset explicitly authorizes it, which is the
+declaration of what `THREAT_MODEL.md` section 20.1 calls the excerpt "when the
+rule requires it".
+
+```ts
+const PARAM_GRAMMAR: Readonly<Record<FindingParamKind, RegExp | null>> = {
+  count: null,
+  "http-status": null,
+  excerpt: null,
+  token: /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/,
+  "header-name": /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/,
+  "media-type":
+    /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,127}\/[!#$%&'*+.^_`|~0-9A-Za-z-]{1,127}$/,
+  // Printable ASCII only, minus space, "#", "?" and DEL.
+  "origin-path": /^\/[!-"$->@-~]{0,1024}$/,
+  // RFC 6901, with "/" and "~" escaped as the standard requires.
+  "json-pointer": /^(?:\/(?:[!-.0-}]|~[01])*){0,32}$/,
+};
+
+export function validateOutcomeParams(
+  declaration: AssertionDeclaration,
+  params: Readonly<Record<string, FindingParam>>,
+): void {
+  for (const [name, param] of Object.entries(params)) {
+    const spec = declaration.params[name];
+    if (spec === undefined) {
+      throw new RuleContractViolation(
+        `${declaration.id} declares no parameter ${name}`,
+      );
+    }
+    if (param.kind !== spec.kind) {
+      throw new RuleContractViolation(
+        `${declaration.id} parameter ${name} must be ${spec.kind}`,
+      );
+    }
+    if (param.kind === "excerpt" && !declaration.excerptAuthorized) {
+      throw new RuleContractViolation(
+        `${declaration.id} is not authorized to carry an excerpt`,
+      );
+    }
+    switch (param.kind) {
+      case "count":
+      case "http-status": {
+        if (!Number.isInteger(param.value) || param.value < 0) {
+          throw new RuleContractViolation(
+            `${declaration.id} parameter ${name} is not a whole count`,
+          );
+        }
+        break;
+      }
+      default: {
+        const grammar = PARAM_GRAMMAR[param.kind];
+        if (grammar !== null && !grammar.test(param.value)) {
+          throw new RuleContractViolation(
+            `${declaration.id} parameter ${name} fails its grammar`,
+          );
+        }
+        if (
+          spec.allowedValues !== undefined &&
+          !spec.allowedValues.includes(param.value)
+        ) {
+          throw new RuleContractViolation(
+            `${declaration.id} parameter ${name} is outside its allowed values`,
+          );
+        }
+        break;
+      }
+    }
+  }
+  for (const [name, spec] of Object.entries(declaration.params)) {
+    if (spec.required && params[name] === undefined) {
+      throw new RuleContractViolation(
+        `${declaration.id} requires parameter ${name}`,
+      );
+    }
+  }
+}
+```
+
+`excerpt` has no grammar because a bounded sanitized excerpt is target text by
+definition. Its control is `excerptAuthorized` plus the 256-character cap, not a
+pattern. Every other string kind has one, and the grammars above are the M1 set:
+they are data in the ruleset schema, versioned with it, and not a constant a
+rule can widen.
+
+The remaining gap should be named rather than implied. A `token` that satisfies
+the grammar and any declared allowlist is still target-derived text inside a
+report, and for an assertion whose whole point is to say which token was
+declared, that is the intended behavior. What the schema removes is the ability
+to put something that is not a token there. The security tests in section 7
+cover the rest by measurement rather than by argument.
+
 ### 7. Discovered requests carry provenance and pass an engine origin policy
 
 `ObservationTarget.discovered` requires `provenance`, and the engine checks it
@@ -665,16 +877,37 @@ authorization-like headers, a query secret, terminal and workflow control
 sequences in a header and in a body, and a malformed discovered URL in each of
 the rejection categories above.
 
+Section 6's parameter schema adds one more, and it is a measurement rather than
+an argument. For **every** parameter of **every** assertion in the ruleset, a
+fixture serves a unique secret marker and an output-injection payload in the
+position that parameter is derived from, and the test asserts that the marker
+appears in no report, no reporter output, and no log, and that the payload
+renders inertly. Not one representative parameter: every one, enumerated from
+the ruleset so a new parameter cannot be added without a case appearing. This is
+`THREAT_MODEL.md` section 27.6's marker test applied per parameter path rather
+than per output format.
+
 ### 8. Request identity, deduplication, and evidence identity are three things
 
-`ObservationRequest.id` is rule-local. It is unique within one rule and one
-round, and a duplicate is a contract violation. It is never an evidence id and
-never appears in a report.
+`ObservationRequest.id` is rule-local and **unique within one rule for the whole
+scan**, across both rounds. A duplicate anywhere in that rule's scan is a
+contract violation and exits 4. It is never an evidence id and never appears in
+a report.
+
+The previous revision scoped uniqueness to one rule and one round, so ids could
+be reused between rounds and were internally keyed by `(ruleId, round, id)`.
+Adversarial review on 2026-08-29 showed that made them unresolvable, and it is
+right: `context.observation(id)` and `AssertionOutcome.observationRefs` both
+carry a bare id with no round, and `finish()` can legitimately cite a round-one
+observation, so an id reused across rounds has two answers at exactly the point
+where the core must pick one. Scan-wide uniqueness is the smaller of the two
+fixes. The alternative, a typed `{ round, id }` reference in both positions,
+costs a wider rule-facing type and a migration for every citation site in order
+to buy a rule the freedom to reuse a string, which no M1 rule wants.
 
 Per round, after every selected rule has returned that round's batch:
 
-1. canonicalize each request with the representation-aware key in
-   `ARCHITECTURE.md` section 7;
+1. canonicalize each request with the key defined in ADR-0005 section 3;
 2. deduplicate in registry order, then in each rule's declaration order;
 3. execute the deduplicated batch;
 4. once the round's plan is stable, assign evidence ids in that same order.
@@ -687,7 +920,9 @@ robots observation costs one slot, one dispatch, and one evidence entry.
 The core rewrites `AssertionOutcome.observationRefs` from rule-local ids to
 canonical evidence ids when it builds `RuleFinding.evidenceRefs`, deduplicating
 and sorting them. Two rules citing the same observation cite the same evidence
-id. A rule-local id naming no request in a completed round exits 4.
+id. A rule-local id naming no request in a completed round exits 4. Because ids
+are unique for the rule's whole scan, that rewrite needs only `(ruleId, id)` and
+never has to guess a round.
 
 Budget slots and evidence ids are therefore separate: slots are anonymous and
 reserved before round one, and ids are assigned per round after that round's
@@ -746,7 +981,7 @@ manifest the single machine-readable authority and `PROJECT_STATUS.md` a
 generated summary. It is never derived from `maturity`, which describes the
 pinned source set.
 
-### 11. Memo values are deeply frozen
+### 11. Memo values are validated as plain data, then deeply frozen
 
 `ARCHITECTURE.md` section 7 prescribes one shared parsed robots representation
 consumed by three rules, while section 1 promises that "one rule cannot change
@@ -774,6 +1009,92 @@ objects, arrays, strings, numbers, booleans, and `null`. A parser wanting to
 return a `Map` returns a frozen array of frozen pairs instead. A contract test
 must prove a mutation attempt on a memo result throws under ESM strict mode.
 
+#### The previous revision stated the restriction and enforced nothing
+
+It said `deepFreeze` is generic over `T`, acknowledged that freezing does not
+immobilize a `Map`, a `Set`, or a typed array, declared those values forbidden,
+and then defined neither a validation nor a violation. Adversarial review on
+2026-08-29 was right that a restriction with no check is a comment. Worse, the
+walk itself reads every own property, so a getter returning a fresh object on
+each call would have been invoked by the freezing pass and would have defeated
+it silently.
+
+Memo results are therefore **validated before they are cached**, and rejection
+is an enumerated contract violation that exits 4 (section 5). Validation runs
+first and freezing second, because the freezing walk is only safe once accessors
+are known to be absent.
+
+```ts
+const PLAIN_PROTOTYPES: readonly unknown[] = [
+  Object.prototype,
+  Array.prototype,
+  null,
+];
+
+function assertPlainData(value: unknown, seen: Set<object>): void {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new RuleContractViolation(`memo value of type ${typeof value}`);
+  }
+  if (value === null) {
+    return;
+  }
+  if (seen.has(value)) {
+    throw new RuleContractViolation("memo value is cyclic or shares a node");
+  }
+  seen.add(value);
+  if (!PLAIN_PROTOTYPES.includes(Object.getPrototypeOf(value))) {
+    throw new RuleContractViolation("memo value has a non-plain prototype");
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === "symbol") {
+      throw new RuleContractViolation("memo value has a symbol-keyed property");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new RuleContractViolation("memo value has an accessor property");
+    }
+    assertPlainData(descriptor.value, seen);
+  }
+}
+
+export function acceptMemoValue<T>(value: T): T {
+  assertPlainData(value, new Set<object>());
+  return deepFreeze(value);
+}
+```
+
+`memo()` calls `acceptMemoValue` on the loader's result and caches only what it
+returns. Four things this rejects are worth naming, because each one is a way
+the previous revision's promise could have been broken without any code looking
+wrong:
+
+- a `Map`, `Set`, `Date`, `Uint8Array`, `RegExp`, `Error`, or class instance,
+  caught by the prototype check rather than by a list of banned constructors,
+  so a type nobody thought of is rejected too;
+- an accessor property, whether or not it is enumerable;
+- a cycle, and also a plain object appearing twice in one memo value, which is
+  rejected together with cycles because the walk cannot tell them apart without
+  a second pass and neither is worth one;
+- `undefined` anywhere, including as a property value, because canonical JSON
+  cannot distinguish a `undefined` property from an absent one and the report
+  must not depend on which the parser produced.
+
+A `null` prototype is permitted alongside `Object.prototype` because
+`Object.create(null)` is the safer shape for a parser building a map keyed by
+target-controlled strings, and forbidding it would push parsers toward the
+prototype-polluting alternative.
+
+`Object.isFrozen` short-circuits `deepFreeze` but not `assertPlainData`, so a
+frozen `Map` is still rejected. Validation is a property of the value, not of
+its freeze state.
+
 ### 12. Forbidden
 
 - a `Promise`, `async` function, `AbortSignal`, `URL`, timer, or callback
@@ -781,9 +1102,14 @@ must prove a mutation attempt on a memo result throws under ESM strict mode.
 - rules calling global `fetch`, Undici, `node:http`, DNS, sockets, the
   filesystem, environment variables, the clock, or randomness, enforced by the
   controls in section 2 and not by the signature;
-- a rule returning a status, a requirement class, or a message string;
+- a rule returning a status, a requirement class, a message string, or a source
+  reference;
 - a rule returning `unsupported-runtime`;
-- a `not-applicable` finding coexisting with an evaluated finding;
+- an outcome set mixing `not-present` with an evaluated outcome kind;
+- an invoked rule returning no outcomes, or omitting an assertion it declares
+  for the active mode;
+- a `not-present` outcome used for a condition that did not arise inside a
+  mechanism the target does deploy;
 - a third round, a round-two batch exceeding `roundTwoBudget`, or a round-one
   request naming an absolute discovered URL;
 - a discovered request without provenance, or one the engine origin policy
@@ -791,10 +1117,14 @@ must prove a mutation attempt on a memo result throws under ESM strict mode.
 - an assertion id outside `metadata.assertions`, or used in the wrong mode;
 - a compatibility finding citing a normative requirement id or a normative
   source instead of the compatibility snapshot;
-- a rule-local request id reused within one rule and round, or treated as an
-  evidence id;
-- mutating a memo result, or storing a `Map`, `Set`, `Date`, `Uint8Array`, or
-  class instance in one.
+- a parameter the assertion does not declare, of the wrong kind, failing its
+  grammar or allowlist, or an `excerpt` on an assertion that is not authorized
+  to carry one;
+- a rule-local request id reused anywhere within one rule's scan, or treated as
+  an evidence id;
+- mutating a memo result, or storing in one a `Map`, `Set`, `Date`,
+  `Uint8Array`, `RegExp`, class instance, accessor property, symbol key, cycle,
+  or `undefined`.
 
 ## Rationale
 
@@ -829,7 +1159,15 @@ first plugin proposal would have inherited a boundary that never existed.
 - The robots observation is planned once and shared by three rules.
 - Response arrival order is not observable by rule code at all.
 - A recommended assertion cannot produce `fail` under any rule implementation.
-- No target-controlled string reaches a report through a finding message.
+- A rule cannot become `not-applicable` by returning nothing, and cannot become
+  `pass` by omitting the assertion it would have failed.
+- No target-controlled string reaches a report through a finding message, and
+  what reaches a template parameter is constrained by name, kind, grammar, and
+  allowlist rather than by length alone.
+- A finding cites the sources its assertion rests on, because a rule has no way
+  to supply a citation at all.
+- A memo value that a freeze cannot immobilize is rejected before it is cached,
+  rather than being listed as forbidden and accepted.
 - A compatibility verdict and a specification verdict on the same mechanism
   carry different identifiers, classes, and cited sources.
 - The rule package compiles under `lib: ["ES2023"], types: []`.
@@ -842,6 +1180,15 @@ first plugin proposal would have inherited a boundary that never existed.
   adding diagnostic detail is a ruleset change with a version bump.
 - Template and parameter tables must be written, reviewed, and covered for
   every assertion and outcome kind, which is more surface than a string field.
+- Each assertion now also carries its authoritative sources, a parameter schema,
+  and an excerpt authorization, so a new assertion is a four-part ruleset change
+  before any rule code exists.
+- Requiring an outcome for every declared assertion means a rule cannot stay
+  silent about a dimension it has not implemented yet. It must report
+  `indeterminate` and say so, which is more honest and more verbose.
+- Memo validation walks the whole value a second time before freezing it, and
+  forbids shapes a parser might reasonably have produced, notably a shared
+  subtree appearing under two keys.
 - The two-round limit is a hard ceiling. A future mechanism needing two hops
   requires a new ADR, not a configuration value.
 - The security boundary now depends on lint rules, dependency inspection, and a
@@ -859,6 +1206,21 @@ first plugin proposal would have inherited a boundary that never existed.
   belongs to the report-schema work.
 - `ARCHITECTURE.md` section 6 must be replaced by a reference to this ADR,
   because `RuleV1`, `RuleContextV1`, `probe`, and `probeAll` no longer exist.
+- `specs/ruleset.schema.json` (ADR-0008) must carry, per declared assertion, the
+  authoritative `source_refs`, the parameter schema, and the excerpt
+  authorization that section 6 requires, and must reject an assertion that
+  declares a parameter no template for that assertion references.
+- A contract test enumerates every assertion in the pinned ruleset and asserts
+  that every template placeholder resolves to a declared parameter and every
+  required declared parameter appears in at least one template.
+- The engine test suite covers the section 5 violations directly: a rule
+  returning no outcomes, a rule omitting one declared assertion, and an outcome
+  set mixing `not-present` with an evaluated kind, each asserted to exit 4.
+- A test asserts that a rule reusing one request id across its two rounds exits
+  4, and that two different rules using the same id string do not collide.
+- A memo test passes a `Map`, a `Set`, a `Uint8Array`, an object with a getter,
+  an object with a symbol key, a cyclic object, a shared subtree, and an
+  `undefined` property, and asserts each exits 4 before anything is cached.
 
 ### Noted, not resolved here
 

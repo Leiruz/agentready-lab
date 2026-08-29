@@ -213,9 +213,56 @@ M1 rules take options:
 `web.policy.content-signals` takes no options; its recognized token set is
 pinned by ADR-0009 rather than configured.
 
-Options are inputs to `plan()`, `step()`, and `finish()` (ADR-0002). They are
-recorded in the report only where they change what was requested, and never as a
-free-form blob.
+Options are inputs to `plan()`, `step()`, and `finish()` (ADR-0002).
+
+#### Every effective option is recorded, not only the ones that change a request
+
+The previous revision said options "are recorded in the report only where they
+change what was requested". Adversarial review on 2026-08-29 rejected that and
+is right. Two of this table's entries change the verdict while requesting the
+identical resource: `web.policy.ai-crawler` fetches `/robots.txt` whatever its
+crawler tokens and tested path are, and computes a different effective access
+decision for each. Under the previous rule neither would have been recorded, so
+two reports could disagree on `bot-002` with nothing in either one explaining
+why. A canonical report that cannot account for its own differences is not the
+reusable evidence G-4 asks for.
+
+The report therefore records the complete validated effective option set for
+every selected rule, including values that came from a rule's
+`defaultOptions` rather than from the user, because a default that changes
+between ruleset versions is exactly the difference a reader needs to see.
+
+```ts
+export type EffectiveOptionValue =
+  | { readonly kind: "boolean"; readonly value: boolean }
+  | { readonly kind: "integer"; readonly value: number }
+  | { readonly kind: "string"; readonly value: string }
+  | { readonly kind: "string-list"; readonly value: readonly string[] }
+  | { readonly kind: "redacted" };
+
+export interface EffectiveRuleOptions {
+  readonly ruleId: string;
+  /** Every validated option key for this rule, sorted by key. */
+  readonly options: Readonly<Record<string, EffectiveOptionValue>>;
+}
+```
+
+`CanonicalScanReportV1` carries `effectiveOptions: readonly
+EffectiveRuleOptions[]`, sorted by `ruleId`. The four value kinds are the whole
+of what the seven M1 option schemas need, which is why there is no
+free-form blob: a schema that cannot be expressed in them is a schema this
+decision has not seen, and adding a kind is a visible change.
+
+Redaction follows the evidence rules and not a looser standard. A value that a
+rule's option schema marks as secret-shaped, or that matches the query-value and
+credential rules in `THREAT_MODEL.md` section 20.2, is serialized as
+`{ "kind": "redacted" }` with no length, no prefix, and no digest. No M1 option
+is secret-shaped, so the kind exists to keep a future one from forcing a schema
+change rather than to serve a present case.
+
+Determinism is a property of the encoding, not of the writer: keys sorted,
+entries sorted by `ruleId`, list values in the order the validated schema
+produced, and no wall-clock or environment-derived value permitted.
 
 ### 9. Precedence
 
@@ -268,6 +315,8 @@ worse than a broken build.
 - Unknown selectors fail at exit 2 before the network is touched.
 - Informational results stay visible without silently changing the gate.
 - Configuration cannot widen a security budget under any precedence order.
+- Two canonical reports that disagree carry, between them, every validated
+  input that could have caused the disagreement.
 
 ### Costs
 
@@ -276,7 +325,12 @@ worse than a broken build.
 - `--profile commerce` is a documented error in M1 rather than a degraded run.
 - A user who wants an absent optional mechanism to fail cannot get it from
   configuration; that needs a rule-level ADR and a registry change.
-- Seven per-rule option schemas must be written, versioned, and tested in M1.
+- Seven per-rule option schemas must be written, versioned, and tested in M1,
+  and each option now needs a declared value kind and a secret-shaped flag.
+- Every report carries an `effectiveOptions` block for every selected rule, so
+  the smallest scan grows by a block that is mostly defaults. `report diff` must
+  treat a default that moved with a ruleset version as a real difference, which
+  is the point, and will therefore surface changes a user did not make.
 - Dropping `rules.severity` removes an escape hatch some CI users will want.
 
 ### Implementation constraints
@@ -285,7 +339,14 @@ worse than a broken build.
   map from `rule_id` to that rule's validated option object.
 - The registry-to-metadata projection applies the section 2 rename, and a
   contract test asserts the two vocabularies map one to one with no residue.
-- `RuleResult.gate` is added to the report schema and the JSON reporter.
+- `RuleResult.gate` and `CanonicalScanReportV1.effectiveOptions` are added to
+  the report schema and the JSON reporter.
+- A contract test asserts that for every selected rule, every key of that rule's
+  validated option object appears in `effectiveOptions`, so a new option cannot
+  be added without becoming visible.
+- A determinism test asserts that two runs with the same configuration produce
+  byte-identical `effectiveOptions`, and that changing only
+  `web.policy.ai-crawler`'s tested path changes it.
 - `agentready-lab rules list` prints `rule_id`, category, profiles,
   applicability using the native names, and gate, so a selector can be written
   without reading YAML.
