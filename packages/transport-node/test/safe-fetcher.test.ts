@@ -3,17 +3,17 @@ import { Readable } from "node:stream";
 import { transportCapabilities } from "@agentready-lab/core";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  createNodeTransport,
-  nodeExchange,
-  tlsOptionsFor,
-} from "../src/index.js";
+import { createNodeTransport, tlsOptionsFor } from "../src/index.js";
+import type { ByteStream } from "../src/index.js";
+// By module path: the entry point exports neither the connector nor the wire
+// types, so that no consumer can reach `http.request` without a policy.
+import { createInjectedTransport, nodeExchange } from "../src/safe-fetcher.js";
 import type {
   ConnectionAttempt,
   ExchangeResult,
   OpenExchange,
   WireExchange,
-} from "../src/index.js";
+} from "../src/safe-fetcher.js";
 import {
   createConnectorSpy,
   loopbackPolicy,
@@ -21,6 +21,7 @@ import {
   reservedPort,
   startHttpServer,
   startRawServer,
+  startTlsServer,
 } from "./support/loopback.js";
 import type { Loopback } from "./support/loopback.js";
 
@@ -199,7 +200,7 @@ describe("request construction", () => {
       }),
     );
 
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy(server.origin),
       openExchange: recorder.open,
     });
@@ -222,7 +223,7 @@ describe("request construction", () => {
       }),
     );
 
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy(server.origin),
       openExchange: recorder.open,
     });
@@ -323,7 +324,7 @@ describe("sec-003, sec-004 and sec-005: redirects cannot leave the origin", () =
     const recorder = recordingExchange();
     const server = await redirectingTo("http://10.0.0.1/internal");
 
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy(server.origin),
       openExchange: recorder.open,
     });
@@ -560,15 +561,11 @@ describe("sec-007: the byte caps", () => {
     });
   });
 
-  it("stops on an oversized Content-Length before reading a body byte", async () => {
-    let bodyWritten = false;
+  it("refuses an oversized Content-Length", async () => {
     const server = track(
       await startHttpServer((_request, response) => {
         response.writeHead(200, { "content-length": "5000" });
-        response.write("a".repeat(5000), () => {
-          bodyWritten = true;
-        });
-        response.end();
+        response.end("a".repeat(5000));
       }),
     );
 
@@ -586,7 +583,42 @@ describe("sec-007: the byte caps", () => {
       kind: "failure",
       reason: { code: "response-too-large", phase: "body" },
     });
-    void bodyWritten;
+  });
+
+  it("reads no body byte when Content-Length already exceeds the cap", async () => {
+    // Section 16's "check `Content-Length` early", as an observation rather
+    // than a claim. The case above cannot make it: a server write callback
+    // reports what the server flushed, not what the client consumed, so it
+    // stays true for a transport that reads the whole body and rejects it
+    // afterwards. Only a stream this test owns can count the reads.
+    let reads = 0;
+    const body: ByteStream = {
+      destroy: () => undefined,
+      async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+        reads += 1;
+        yield await Promise.resolve(new Uint8Array(5000));
+      },
+    };
+
+    const transport = createInjectedTransport({
+      policy: loopbackPolicy("http://127.0.0.1:8080/"),
+      openExchange: fakeWire({
+        rawHeaders: [["content-length", "5000"]],
+        body,
+      }),
+    });
+    const result = await transport.http(
+      makeRequest("http://127.0.0.1:8080/", {
+        maxEncodedBytes: 100,
+        maxDecodedBytes: 100,
+      }),
+    );
+
+    expect(result).toStrictEqual({
+      kind: "failure",
+      reason: { code: "response-too-large", phase: "body" },
+    });
+    expect(reads).toBe(0);
   });
 });
 
@@ -703,7 +735,7 @@ describe("HTTP framing, section 17", () => {
 
 describe("connection pinning and the peer check", () => {
   it("fails closed when the peer is not the selected address", async () => {
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy("http://127.0.0.1:8080/"),
       openExchange: fakeWire({ peerAddress: "127.0.0.2" }),
     });
@@ -716,7 +748,7 @@ describe("connection pinning and the peer check", () => {
   });
 
   it("fails closed when the peer cannot be determined at all", async () => {
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy("http://127.0.0.1:8080/"),
       openExchange: fakeWire({ peerAddress: null }),
     });
@@ -729,7 +761,7 @@ describe("connection pinning and the peer check", () => {
   });
 
   it("accepts an IPv4-mapped spelling of the selected address", async () => {
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy("http://127.0.0.1:8080/"),
       openExchange: fakeWire({ peerAddress: "::ffff:127.0.0.1" }),
     });
@@ -767,6 +799,32 @@ describe("ambient environment", () => {
     expect(text(result.body)).toBe("direct");
     expect(proxy.connections()).toBe(0);
     expect(server.connections()).toBe(1);
+  });
+
+  it("refuses an untrusted certificate with NODE_TLS_REJECT_UNAUTHORIZED=0 set", async () => {
+    // The behavioural half, and the one that survives a mutation. Asserting
+    // what `tlsOptionsFor` returns says nothing about whether the connector
+    // passes it to the socket: deleting the `...tlsOptionsFor(...)` spread
+    // from the `https.request` call leaves that assertion true. Here the
+    // environment variable would make the default permissive, so a request
+    // that reaches this server without the explicit `rejectUnauthorized`
+    // succeeds and reads the body.
+    const server = track(
+      await startTlsServer((_request, response) => {
+        response.end("verification was skipped");
+      }),
+    );
+    process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
+
+    const transport = createNodeTransport({
+      policy: loopbackPolicy(server.origin),
+    });
+    const result = await transport.http(makeRequest(`${server.origin}/`));
+
+    expect(result).toStrictEqual({
+      kind: "failure",
+      reason: { code: "tls-failure", phase: "tls" },
+    });
   });
 
   it("does not honour NODE_TLS_REJECT_UNAUTHORIZED=0", () => {
@@ -841,7 +899,7 @@ describe("failure semantics", () => {
   });
 
   it("never lets an exception cross the boundary", async () => {
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy("http://127.0.0.1:8080/"),
       openExchange: () => {
         throw new Error("connector exploded at http://127.0.0.1:8080/secret");
@@ -869,7 +927,7 @@ describe("failure semantics", () => {
 describe("the connector spy is a real seam", () => {
   it("is what the refusal tests observe", async () => {
     const spy = createConnectorSpy();
-    const transport = createNodeTransport({
+    const transport = createInjectedTransport({
       policy: loopbackPolicy("http://127.0.0.1:8080/"),
       openExchange: spy.open,
     });

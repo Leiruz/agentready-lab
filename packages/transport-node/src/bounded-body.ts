@@ -101,13 +101,39 @@ export async function readBoundedBody(
     return { kind: "failure", reason };
   };
 
+  /**
+   * Which cap was crossed first, rather than which one is checked first.
+   *
+   * ADR-0003 section 4 projects `encodedBoundByScan` and `decodedBoundByScan`
+   * to different public codes, so a read that carries the totals past both
+   * caps at once has to name the one that actually bound. A fixed
+   * encoded-then-decoded order gets that right only while the encoded cap is
+   * the lower one, and tells a user their whole-scan budget is spent when it
+   * is their per-response cap that stopped the read, or the reverse.
+   *
+   * M1 counts the same number into both totals, so the lower cap is the one
+   * the stream reached first. A tie goes to the encoded cap, matching
+   * `resolveByteCaps`: it is the wire number, and the per-response reason is
+   * the one a caller can act on. Implementing a decoder would make the two
+   * totals differ and make this the place to revisit.
+   */
+  const capExceeded = (
+    encodedTotal: number,
+    decodedTotal: number,
+  ): TransportReason | null => {
+    const overEncoded = encodedTotal > caps.encoded;
+    const overDecoded = decodedTotal > caps.decoded;
+    if (!overEncoded && !overDecoded) return null;
+    const encodedFirst =
+      overEncoded && (!overDecoded || caps.encoded <= caps.decoded);
+    return byteCapReason(
+      encodedFirst ? caps.encodedBoundByScan : caps.decodedBoundByScan,
+    );
+  };
+
   if (declaredLength !== null) {
-    if (declaredLength > caps.encoded) {
-      return fail(byteCapReason(caps.encodedBoundByScan));
-    }
-    if (declaredLength > caps.decoded) {
-      return fail(byteCapReason(caps.decodedBoundByScan));
-    }
+    const declared = capExceeded(declaredLength, declaredLength);
+    if (declared !== null) return fail(declared);
   }
 
   const chunks: Uint8Array[] = [];
@@ -136,12 +162,8 @@ export async function readBoundedBody(
       // two are still incremented and checked independently.
       decodedBytes += chunk.byteLength;
 
-      if (encodedBytes > caps.encoded) {
-        return fail(byteCapReason(caps.encodedBoundByScan));
-      }
-      if (decodedBytes > caps.decoded) {
-        return fail(byteCapReason(caps.decodedBoundByScan));
-      }
+      const overCap = capExceeded(encodedBytes, decodedBytes);
+      if (overCap !== null) return fail(overCap);
       chunks.push(chunk);
     }
   } catch (error) {

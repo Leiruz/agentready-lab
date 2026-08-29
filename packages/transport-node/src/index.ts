@@ -53,6 +53,20 @@ export {
 } from "./budget.js";
 export type { ByteCapInput, ByteCaps, Clock } from "./budget.js";
 
+/**
+ * `nodeExchange` and the wire types it speaks are deliberately absent.
+ *
+ * The connector takes a pinned address, a port and a `lookup` and hands them
+ * to `http.request`. It is the one function in the package that opens a
+ * socket, and it asks no policy first, because every check happens above it.
+ * Exporting it would therefore publish a fully typed path around
+ * `createNodeTransport`: a caller could build a `PinnedResolver` for
+ * `169.254.169.254` and call the connector directly, with no
+ * `LocalLoopbackPolicy` and no URL or network authorization anywhere in the
+ * call. It stays package-internal, and so do `ConnectionAttempt`,
+ * `WireExchange`, `ExchangeResult` and `OpenExchange`, which exist only to
+ * describe it. This package's own tests reach them by module path.
+ */
 export {
   DEFAULT_USER_AGENT,
   REQUEST_ACCEPT_ENCODING,
@@ -60,13 +74,6 @@ export {
   checkResponseFraming,
   classifyRequestError,
   createNodeTransport,
-  nodeExchange,
   tlsOptionsFor,
 } from "./safe-fetcher.js";
-export type {
-  ConnectionAttempt,
-  ExchangeResult,
-  NodeTransportOptions,
-  OpenExchange,
-  WireExchange,
-} from "./safe-fetcher.js";
+export type { NodeTransportOptions } from "./safe-fetcher.js";

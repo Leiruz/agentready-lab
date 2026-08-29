@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   LocalLoopbackPolicy,
   applyUrlPolicy,
+  classifyAddress,
   createNetworkPolicy,
-  createNodeTransport,
 } from "../src/index.js";
 import type { CanonicalTarget } from "../src/index.js";
+// By module path: the entry point exposes no connector seam, so the factory
+// that takes one is reached the way only this package can reach it.
+import { createInjectedTransport } from "../src/safe-fetcher.js";
 import {
   createConnectorSpy,
   loopbackPolicy,
@@ -88,6 +91,63 @@ describe("what may be a local-loopback target", () => {
     if (result.kind !== "rejected") return;
     expect(result.reason.code).toBe(code);
   });
+});
+
+describe("a transition form is not a native loopback destination", () => {
+  /**
+   * `classifyAddress` judges `::ffff:127.0.0.1`, the deprecated `::7f00:1` and
+   * the `64:ff9b::/96` NAT64 form by the IPv4 they embed. That is the
+   * conservative answer to "may this be reached", and it is the wrong answer
+   * to "is this the loopback interface": a NAT64 literal is routed, so a
+   * policy built for one would authorize an origin whose packets leave the
+   * machine. `local-loopback` therefore admits native `127.0.0.0/8` and
+   * native `::1` only, and the narrowing lives at policy construction so that
+   * the classifier keeps over-blocking for every other caller.
+   */
+  const transitionForms = [
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::7f00:1]/",
+    "http://[64:ff9b::7f00:1]/",
+  ];
+
+  it.each(transitionForms)(
+    "%s still classifies as loopback by its embedded IPv4",
+    (url) => {
+      // The control. Without it every case below would pass just as well if
+      // the classifier had stopped calling these loopback at all, which is a
+      // different behaviour and not the one being narrowed.
+      const classified = classifyAddress(targetFor(url).hostname);
+      expect(classified.kind).toBe("address");
+      if (classified.kind !== "address") return;
+      expect(classified.addressClass).toBe("loopback");
+      expect(classified.embeddedIpv4).toBe("127.0.0.1");
+    },
+  );
+
+  it.each(transitionForms)(
+    "refuses %s as an origin and opens no connection",
+    async (url) => {
+      const spy = createConnectorSpy();
+      const result = createNetworkPolicy("local-loopback", url);
+
+      // Soft, so that a regression reports both halves in one run: the policy
+      // that should not exist, and the socket it would have opened.
+      expect.soft(result.kind).toBe("rejected");
+      if (result.kind === "rejected") {
+        expect(result.reason.code).toBe("unsafe-address");
+      } else if (result.kind === "policy") {
+        // Unreachable while the constructor refuses these. It is here so that
+        // a regression reports itself as a socket opened to a routed address,
+        // which is the actual cost, rather than only as a changed result kind.
+        const transport = createInjectedTransport({
+          policy: result.policy,
+          openExchange: spy.open,
+        });
+        await transport.http(makeRequest(url));
+      }
+      expect(spy.attempts).toStrictEqual([]);
+    },
+  );
 });
 
 describe("exact-origin authorization", () => {
@@ -192,7 +252,10 @@ describe("no socket exists for a refused destination", () => {
     "https://127.0.0.1:44100/",
   ])("opens no connection for %s", async (url) => {
     const spy = createConnectorSpy();
-    const transport = createNodeTransport({ policy, openExchange: spy.open });
+    const transport = createInjectedTransport({
+      policy,
+      openExchange: spy.open,
+    });
 
     const result = await transport.http(makeRequest(url));
 
@@ -204,7 +267,10 @@ describe("no socket exists for a refused destination", () => {
     // The control. Without it, a transport that connected to nothing at all
     // would satisfy every case above.
     const spy = createConnectorSpy();
-    const transport = createNodeTransport({ policy, openExchange: spy.open });
+    const transport = createInjectedTransport({
+      policy,
+      openExchange: spy.open,
+    });
 
     return transport
       .http(makeRequest("http://127.0.0.1:44100/robots.txt"))

@@ -113,11 +113,30 @@ export type OpenExchange = (
   attempt: ConnectionAttempt,
 ) => Promise<ExchangeResult>;
 
+/**
+ * What the package entry point accepts. There is no connector field here, and
+ * that is the point: `createNodeTransport` is the only factory `index.ts`
+ * exports, so nothing a caller can write substitutes the socket.
+ */
 export interface NodeTransportOptions {
   readonly policy: LocalLoopbackPolicy;
   readonly userAgent?: string;
-  readonly openExchange?: OpenExchange;
   readonly clock?: Clock;
+}
+
+/**
+ * The injecting factory's options, package-internal and not re-exported.
+ *
+ * `docs/THREAT_MODEL.md` section 27 requires "injected resolvers, connectors,
+ * clocks, byte streams, and local canaries", and a spy connector is how a
+ * refusal is proved to happen before a socket exists. That seam is a second
+ * function rather than two more optional fields on the public one, because an
+ * optional field is still part of the published surface: a caller could hand
+ * `createNodeTransport` a connector of their own, and the exported
+ * `ConnectionAttempt` would tell them exactly how to shape one.
+ */
+export interface InjectedTransportOptions extends NodeTransportOptions {
+  readonly openExchange?: OpenExchange;
 }
 
 function failure(reason: TransportReason): HttpTransportResult {
@@ -585,7 +604,7 @@ async function runHttp(
 }
 
 /**
- * The `Transport` implementation.
+ * The `Transport` implementation both factories below return.
  *
  * There is no `dns` method: `transportCapabilities` derives the runtimes from
  * the methods present, so a `dns` rule resolves to `unsupported-runtime`
@@ -595,14 +614,7 @@ async function runHttp(
  * nothing about the exception, because ADR-0003 section 6 keeps every public
  * message a constant and a library exception can carry a raw URL.
  */
-export function createNodeTransport(options: NodeTransportOptions): Transport {
-  const context: FetchContext = {
-    policy: options.policy,
-    openExchange: options.openExchange ?? nodeExchange,
-    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
-    clock: options.clock ?? systemClock,
-  };
-
+function transportFor(context: FetchContext): Transport {
   return {
     http: async (request) => {
       try {
@@ -612,4 +624,36 @@ export function createNodeTransport(options: NodeTransportOptions): Transport {
       }
     },
   };
+}
+
+/**
+ * The public factory, and the only one `index.ts` exports.
+ *
+ * `nodeExchange` is named here and read from nowhere else, so the connector of
+ * a transport built through this function is not a value any caller supplied,
+ * whatever their options object also happens to carry.
+ */
+export function createNodeTransport(options: NodeTransportOptions): Transport {
+  return transportFor({
+    policy: options.policy,
+    openExchange: nodeExchange,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+    clock: options.clock ?? systemClock,
+  });
+}
+
+/**
+ * The same transport with the connector seam open, for this package's own
+ * tests. `index.ts` does not export it, and neither the connector nor the
+ * wire types it needs are reachable from outside the package.
+ */
+export function createInjectedTransport(
+  options: InjectedTransportOptions,
+): Transport {
+  return transportFor({
+    policy: options.policy,
+    openExchange: options.openExchange ?? nodeExchange,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+    clock: options.clock ?? systemClock,
+  });
 }

@@ -132,6 +132,21 @@ export class LocalLoopbackPolicy {
         detail: "local-loopback permits only a loopback address",
       };
     }
+    // `classifyAddress` judges `::ffff:127.0.0.1`, the deprecated `::7f00:1`
+    // and the `64:ff9b::/96` NAT64 form by the IPv4 they embed, which is the
+    // conservative answer for deciding what to deny and the wrong one for
+    // deciding what to admit: a NAT64 literal is routed, so an origin built
+    // from one would send packets off the loopback interface with a policy
+    // that says otherwise. Only a native address is a native destination, and
+    // for a loopback class that means `127.0.0.0/8` or `::1`.
+    if (classified.embeddedIpv4 !== undefined) {
+      return {
+        kind: "rejected",
+        reason: { code: "unsafe-address", phase: "dns" },
+        detail:
+          "local-loopback permits only a native loopback address; an IPv4-mapped, IPv4-compatible or NAT64 form is a routed destination",
+      };
+    }
 
     return {
       kind: "policy",

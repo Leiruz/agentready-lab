@@ -217,6 +217,90 @@ describe("the byte cap", () => {
   });
 });
 
+describe("which budget a read that crosses both caps reports", () => {
+  /**
+   * ADR-0003 section 4 projects `encodedBoundByScan` and `decodedBoundByScan`
+   * to different public codes, so when one read crosses both caps the reported
+   * one has to be the cap that was actually crossed first. Checking the
+   * encoded cap first and returning its reason is only the same answer while
+   * the encoded cap is the lower one.
+   *
+   * Each case below carries different reasons for the two caps, which is what
+   * makes the answer observable at all: with both flags equal every ordering
+   * produces the same code.
+   */
+  const cases: readonly (readonly [string, Partial<ByteCaps>, string])[] = [
+    [
+      "the encoded cap is lower",
+      {
+        encoded: 50,
+        decoded: 100,
+        encodedBoundByScan: false,
+        decodedBoundByScan: true,
+      },
+      "response-too-large",
+    ],
+    [
+      "the decoded cap is lower",
+      {
+        encoded: 100,
+        decoded: 50,
+        encodedBoundByScan: false,
+        decodedBoundByScan: true,
+      },
+      "scan-byte-budget-exceeded",
+    ],
+    [
+      "the two caps are equal",
+      {
+        encoded: 50,
+        decoded: 50,
+        encodedBoundByScan: false,
+        decodedBoundByScan: true,
+      },
+      // The tie rule, and it matches `resolveByteCaps`: the per-response cap
+      // is the one a caller chose for this response, so it is the one named.
+      "response-too-large",
+    ],
+  ];
+
+  it.each(cases)(
+    "names the budget that bound when %s, streaming",
+    async (_label, overrides, code) => {
+      // One chunk that carries the first byte past both caps, so the failure
+      // cannot be attributed to the order the chunks arrived in.
+      const result = await readBoundedBody(
+        streamOf([bytes(101)]),
+        caps(overrides),
+        null,
+        generousDeadline(),
+      );
+      expect(result).toStrictEqual({
+        kind: "failure",
+        reason: { code, phase: "body" },
+      });
+    },
+  );
+
+  it.each(cases)(
+    "names the budget that bound when %s, declared",
+    async (_label, overrides, code) => {
+      const stream = streamOf([bytes(10)]);
+      const result = await readBoundedBody(
+        stream,
+        caps(overrides),
+        101,
+        generousDeadline(),
+      );
+      expect(result).toStrictEqual({
+        kind: "failure",
+        reason: { code, phase: "body" },
+      });
+      expect(stream.consumed()).toBe(0);
+    },
+  );
+});
+
 describe("the elapsed deadline", () => {
   it("refuses to start once the deadline has passed", async () => {
     const result = await readBoundedBody(

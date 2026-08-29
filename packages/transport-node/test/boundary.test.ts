@@ -388,3 +388,62 @@ describe("ci-public is unconstructible, not merely refused", () => {
     expect(errors.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The connector is the one function that opens a socket, and it asks no
+ * policy: every check happens above it. Exporting it, or a way to put another
+ * one in its place, would be a typed path around `createNodeTransport` for a
+ * caller who wanted `169.254.169.254` and no `LocalLoopbackPolicy` at all.
+ */
+describe("the entry point publishes no socket of its own", () => {
+  it("exports no value that opens a connection", async () => {
+    const entry: Record<string, unknown> = await import("../src/index.js");
+    expect(Object.keys(entry)).not.toContain("nodeExchange");
+  });
+
+  it("names neither the connector nor the wire vocabulary", () => {
+    // One probe rather than five, because each one compiles the package.
+    // `ConnectionAttempt` and its relatives are listed too: they exist only to
+    // describe the connector, and they are the shape a caller would fill in to
+    // hand-write one.
+    const errors = typeErrorsIn(`
+      import { nodeExchange } from "./index.js";
+      import type {
+        ConnectionAttempt,
+        ExchangeResult,
+        OpenExchange,
+        WireExchange,
+      } from "./index.js";
+      void nodeExchange;
+      export type Probe = [ConnectionAttempt, ExchangeResult, OpenExchange, WireExchange];
+    `).join(" ");
+    for (const name of [
+      "nodeExchange",
+      "ConnectionAttempt",
+      "ExchangeResult",
+      "OpenExchange",
+      "WireExchange",
+    ]) {
+      expect(errors).toContain(
+        `Module '"./index.js"' has no exported member '${name}'.`,
+      );
+    }
+  });
+
+  it("has no way to substitute one through the public factory", () => {
+    const errors = typeErrorsIn(`
+      import { createNetworkPolicy, createNodeTransport } from "./index.js";
+      const result = createNetworkPolicy("local-loopback", "http://127.0.0.1:8080/");
+      if (result.kind === "policy") {
+        createNodeTransport({
+          policy: result.policy,
+          openExchange: () => Promise.resolve({
+            kind: "failure" as const,
+            reason: { code: "connection-failed" as const, phase: "connect" as const },
+          }),
+        });
+      }
+    `);
+    expect(errors.join(" ")).toContain("openExchange");
+  });
+});

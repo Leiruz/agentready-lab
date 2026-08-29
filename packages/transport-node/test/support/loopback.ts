@@ -1,16 +1,22 @@
+import crypto from "node:crypto";
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
 
 import type { HttpTransportRequest } from "@agentready-lab/core";
 
 import { createNetworkPolicy } from "../../src/index.js";
+import type { LocalLoopbackPolicy } from "../../src/index.js";
+// By module path, because the entry point does not export the connector or
+// the types that describe it. A test may reach inside the package; a consumer
+// of the published surface may not.
 import type {
   ConnectionAttempt,
   ExchangeResult,
-  LocalLoopbackPolicy,
   OpenExchange,
-} from "../../src/index.js";
+} from "../../src/safe-fetcher.js";
 
 /**
  * Loopback servers and a connector spy.
@@ -30,10 +36,10 @@ export interface Loopback {
   close(): Promise<void>;
 }
 
-function originFor(host: string, port: number): string {
+function originFor(host: string, port: number, scheme = "http"): string {
   return host.includes(":")
-    ? `http://[${host}]:${String(port)}`
-    : `http://${host}:${String(port)}`;
+    ? `${scheme}://[${host}]:${String(port)}`
+    : `${scheme}://${host}:${String(port)}`;
 }
 
 export async function startHttpServer(
@@ -60,6 +66,143 @@ export async function startHttpServer(
   const address = server.address() as AddressInfo;
   return {
     origin: originFor(host, address.port),
+    port: address.port,
+    connections: () => accepted,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+/**
+ * A self-signed certificate, made in the test process and trusted by nobody.
+ *
+ * A behavioural TLS case needs a certificate the client will refuse, and this
+ * is how to get one without adding a dependency, shelling out to `openssl`, or
+ * committing key material. `node:crypto` generates the key pair and signs;
+ * everything between is the DER of the smallest X.509 the verifier accepts.
+ * There are no extensions and no subjectAltName, because nothing here is meant
+ * to be trusted: the fixture exists so that verification fails.
+ */
+function derLength(length: number): Buffer {
+  if (length < 0x80) return Buffer.from([length]);
+  const bytes: number[] = [];
+  for (let rest = length; rest > 0; rest >>>= 8) bytes.unshift(rest & 0xff);
+  return Buffer.from([0x80 | bytes.length, ...bytes]);
+}
+
+function der(tag: number, body: Buffer): Buffer {
+  return Buffer.concat([Buffer.from([tag]), derLength(body.length), body]);
+}
+
+/** `YYMMDDHHMMSSZ`, the only form an X.509 `UTCTime` takes. */
+function utcTime(at: Date): Buffer {
+  const text = at
+    .toISOString()
+    .replace(/[-:T]/g, "")
+    .replace(/\.\d+Z$/, "Z");
+  return der(0x17, Buffer.from(text.slice(2), "ascii"));
+}
+
+/** `SEQUENCE { SET { SEQUENCE { OID commonName, UTF8String cn } } }`. */
+function distinguishedName(commonName: string): Buffer {
+  const commonNameOid = Buffer.from([0x06, 0x03, 0x55, 0x04, 0x03]);
+  return der(
+    0x30,
+    der(
+      0x31,
+      der(
+        0x30,
+        Buffer.concat([
+          commonNameOid,
+          der(0x0c, Buffer.from(commonName, "utf8")),
+        ]),
+      ),
+    ),
+  );
+}
+
+export function selfSignedCertificate(commonName = "localhost"): {
+  readonly cert: string;
+  readonly key: string;
+} {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  // OID 1.3.101.112. Ed25519 takes no algorithm parameters, and an absent
+  // parameter field is what the encoding below spells.
+  const algorithm = der(0x30, Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x70]));
+  const now = Date.now();
+  const tbs = der(
+    0x30,
+    Buffer.concat([
+      der(0xa0, Buffer.from([0x02, 0x01, 0x02])), // version, v3
+      Buffer.from([0x02, 0x01, 0x01]), // serial number, 1
+      algorithm,
+      distinguishedName(commonName),
+      der(
+        0x30,
+        Buffer.concat([
+          utcTime(new Date(now - 3_600_000)),
+          utcTime(new Date(now + 3_600_000)),
+        ]),
+      ),
+      distinguishedName(commonName),
+      publicKey.export({ type: "spki", format: "der" }),
+    ]),
+  );
+  const signature = crypto.sign(null, tbs, privateKey);
+  const certificate = der(
+    0x30,
+    Buffer.concat([
+      tbs,
+      algorithm,
+      // A BIT STRING carries a leading count of unused trailing bits.
+      der(0x03, Buffer.concat([Buffer.from([0x00]), signature])),
+    ]),
+  );
+
+  const key = privateKey.export({ type: "pkcs8", format: "pem" });
+  if (typeof key !== "string") throw new Error("expected a PEM private key");
+  const base64 = certificate.toString("base64").replace(/(.{64})/g, "$1\n");
+  return {
+    cert: `-----BEGIN CERTIFICATE-----\n${base64}\n-----END CERTIFICATE-----\n`,
+    key,
+  };
+}
+
+/** An HTTPS server whose certificate no client has any reason to trust. */
+export async function startTlsServer(
+  handler: (
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+  ) => void,
+  host = "127.0.0.1",
+): Promise<Loopback> {
+  // `tls.Server` reports its connections as `Duplex`, not as `net.Socket`.
+  const sockets = new Set<Duplex>();
+  let accepted = 0;
+  const server = https.createServer(selfSignedCertificate(), handler);
+  server.on("connection", (socket) => {
+    accepted += 1;
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  // A client that refuses the certificate aborts the handshake, and the
+  // rejection arrives here. Unlistened it is only noise in the test output.
+  server.on("tlsClientError", () => undefined);
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, host, resolve);
+  });
+
+  const address = server.address() as AddressInfo;
+  return {
+    origin: originFor(host, address.port, "https"),
     port: address.port,
     connections: () => accepted,
     close: async () => {
