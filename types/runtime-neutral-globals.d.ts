@@ -64,3 +64,54 @@ declare const URL: {
   canParse(url: string | URL, base?: string | URL): boolean;
   parse(url: string | URL, base?: string | URL): URL | null;
 };
+
+// ---------------------------------------------------------------------------
+// Added for `packages/core/src/schema/`. RFC 8785 section 3.2.4 makes UTF-8
+// part of the canonicalization algorithm, and the ruleset digest in
+// docs/IMPLEMENTATION_SPEC.md section 13 needs SHA-256 over those bytes.
+//
+// Both are declared here rather than reached for through `node:crypto` or
+// `Buffer`, which core may not import. `TextEncoder` is WHATWG Encoding and
+// `crypto.subtle.digest` is W3C WebCrypto; Node.js 24, workerd and browsers
+// all implement both as globals.
+
+/** https://encoding.spec.whatwg.org/#textencoder */
+interface TextEncoder {
+  readonly encoding: "utf-8";
+  encode(input?: string): Uint8Array;
+  encodeInto(
+    source: string,
+    destination: Uint8Array,
+  ): { read: number; written: number };
+}
+
+declare const TextEncoder: {
+  prototype: TextEncoder;
+  new (): TextEncoder;
+};
+
+/**
+ * https://w3c.github.io/webcrypto/#subtlecrypto-interface
+ *
+ * Narrowed to `digest`, and to the one algorithm this project uses. Widening
+ * it means deciding that core may encrypt, sign, or generate keys, which is a
+ * decision with a threat model attached and not a typing convenience.
+ */
+interface SubtleCrypto {
+  digest(
+    algorithm: "SHA-256",
+    data: ArrayBuffer | ArrayBufferView,
+  ): Promise<ArrayBuffer>;
+}
+
+/** https://w3c.github.io/webcrypto/#crypto-interface */
+interface Crypto {
+  readonly subtle: SubtleCrypto;
+}
+
+// `var` and not `const`: only a `var` declaration in a global script becomes a
+// property of `typeof globalThis`, and `globalThis.crypto` is how core reaches
+// it without assuming a bare identifier is in scope. This is the same shape
+// `lib.dom.d.ts` uses.
+// eslint-disable-next-line no-var
+declare var crypto: Crypto;
