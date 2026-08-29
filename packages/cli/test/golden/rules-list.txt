@@ -1,0 +1,17 @@
+agentready-lab rules list - list the rules in the pinned ruleset
+
+USAGE
+  agentready-lab rules list [options]
+
+OPTIONS
+      --profile <content|api|agent-service|full>
+                         List only the rules that name this profile.
+      --mode <spec|compat|interop>
+                         List only the rules that declare this mode.
+      --format <human|json>
+                         Default human. json writes canonical JSON to stdout.
+  -h, --help             Print this help and exit 0.
+
+Applicability and gate use the native ADR-0004 names, not the published
+compatibility-snapshot strings, so a selector can be written from this output
+without reading the ruleset YAML.

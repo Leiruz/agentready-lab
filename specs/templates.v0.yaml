@@ -1,0 +1,639 @@
+# AgentReady Lab finding message templates (ADR-0002 section 6).
+#
+# "Finding prose is a static template, not a rule-supplied string." This is
+# the table that makes that true. A rule reports an outcome kind and typed
+# parameters; packages/core/src/engine/render-message.ts looks the prose up
+# here by assertion id and outcome kind and substitutes only the parameters
+# the assertion declares in specs/ruleset.standard.v0.yaml.
+#
+# HOW TARGET DATA IS KEPT OUT. Every character of every template below is
+# written here and fixed at build time. The only thing that can vary is a
+# {slot}, and a slot may name only a parameter the assertion declares; the
+# validator rejects every other name. The core sanitizes and bounds each
+# parameter value before it is substituted. So the prose names the condition
+# and never the data: "the Markdown representation was not labelled
+# text/markdown" rather than the header value that was served. The header
+# value itself is in the evidence entry the finding cites, which is where a
+# bounded, sanitized copy of what the target served belongs.
+#
+# Exactly one M1 assertion declares a parameter today.
+# content-signals.unrecognized-vocabulary declares recognized-token-count, a
+# count, and it is required. Every other assertion declares `params: []`, so
+# every other template below is parameterless, and a slot in one of them
+# would be a contract violation rather than a formatting choice.
+#
+# WHY ALL FOUR OUTCOME KINDS. renderMessage throws missing-message-template
+# for an assertion and kind with no entry, which would abort a scan mid-run
+# on whatever the target happened to serve. No file can tell which kinds a
+# compiled rule reaches, so requiring all four is the only coverage rule that
+# cannot drift away from the rule bodies. A template is rendered only when
+# that outcome actually occurred, so text for a kind a rule version never
+# produces is unreachable rather than untrue; where that is the case the
+# entry says so in its own `todo`.
+#
+# HOW THE KINDS DIFFER, which is the thing worth getting right. A `violated`
+# template states what the target did. An `indeterminate` template states
+# that this scan could not reach a verdict and why, and never that the target
+# failed: a bound of this scanner, a transport error, or a status outside the
+# successful class is not a conformance defect. A `not-present` template
+# states that the mechanism is not deployed, which is not a failure either.
+#
+# Coverage is mechanical, exactly as in specs/remediation.v0.yaml: an
+# assertion that cites at least one source and is not deferred can be
+# configured, so it is owed an entry, and `pnpm run specs:validate` fails
+# without one. That is the 27 active assertions of the eight M1 rules.
+# skills.archive-safety is deferred and owed nothing, and the fourteen rules
+# whose assertions still carry the source_refs todo are refused before a scan
+# and have no entries here.
+
+schema_version: "0"
+templates_version: "0.1.0"
+ruleset_id: "standard"
+ruleset_version: "0.4.0"
+
+todo:
+  - >-
+    compat_assertions: no rule declares one, so this file carries no
+    compat-mode template. The gap is the ruleset's, recorded in its own todo,
+    and closing it there is what will demand entries here.
+  - >-
+    Several assertions would read better with a parameter the ruleset does
+    not declare: which signal dimensions were omitted, which media type was
+    served, the JSON Pointer to a linkset defect. Each template below is
+    written to be useful without one, and the evidence entry the finding
+    cites carries the observed values. Assigning those parameters is a
+    ruleset change, not a change here.
+
+entries:
+  # ---------------------------------------------------------------------
+  # web.discovery.robots
+  # ---------------------------------------------------------------------
+  - assertion: "robots.location"
+    rule_id: "web.discovery.robots"
+    messages:
+      satisfied: >-
+        /robots.txt was served from the origin root with the text/plain media
+        type RFC 9309 fixes for the file.
+      violated: >-
+        The successful /robots.txt response did not declare the text/plain
+        media type RFC 9309 fixes for the file, so what this origin serves at
+        that path is not a robots.txt a crawler is obliged to read as one.
+      not-present: >-
+        The origin answered /robots.txt with a client-error status, which RFC
+        9309 reads as "unavailable": no robots policy is published here, and
+        every path is allowed by default.
+      indeterminate: >-
+        The /robots.txt retrieval produced no representation this scan could
+        read: the request failed, the status was outside the successful class,
+        or the body was cut at this scanner's size limit. The published
+        location and media type are therefore unknown.
+
+  - assertion: "robots.syntax"
+    rule_id: "web.discovery.robots"
+    messages:
+      satisfied: >-
+        robots.txt decoded as UTF-8 and every line was a record RFC 9309
+        defines or an extension record it permits, so group selection and
+        precedence resolve from the file as written.
+      violated: >-
+        robots.txt was not well-formed UTF-8, or carried lines matching no
+        record RFC 9309 defines. A crawler skips what it cannot parse, so the
+        policy those lines were meant to express is not the policy that will
+        be applied.
+      not-present: >-
+        The origin answered /robots.txt with a client-error status, so there
+        is no published document whose syntax could be read.
+      indeterminate: >-
+        The robots.txt was not read to the end: the retrieval failed, the
+        status was outside the successful class, the body was cut at this
+        scanner's size limit, or the parse stopped at its own bound. A limit
+        of this scanner is not a defect in the file.
+
+  - assertion: "robots.not-authz"
+    rule_id: "web.discovery.robots"
+    todo:
+      - >-
+        `violated` is unreachable at rule_version 0.1.0. This assertion is a
+        disclosure rather than a testable condition, and no target behaviour
+        can make it false. The template exists so renderMessage cannot fail if
+        a later rule version reaches the kind.
+    messages:
+      satisfied: >-
+        Disclosure: the Robots Exclusion Protocol states crawl preferences,
+        not access authorization. A path that only robots.txt disallows stays
+        reachable by anything that does not consult the file, so it must never
+        be relied on to protect a secret.
+      violated: >-
+        A robots.txt preference was reported as an access-control decision.
+        Nothing in RFC 9309 grants or denies access to a resource, and a
+        preference read as authorization would overstate what was observed.
+      not-present: >-
+        No robots.txt is published at this origin, so there is no crawl
+        preference to distinguish from access authorization.
+      indeterminate: >-
+        The robots.txt retrieval did not complete, so this scan reports no
+        crawl preference and the distinction between a preference and an
+        access decision has nothing to attach to.
+
+  # ---------------------------------------------------------------------
+  # web.discovery.sitemap
+  # ---------------------------------------------------------------------
+  - assertion: "sitemap.xml"
+    rule_id: "web.discovery.sitemap"
+    messages:
+      satisfied: >-
+        The sitemap parsed as well-formed UTF-8 XML with a urlset or
+        sitemapindex root in the Sitemaps protocol namespace, at least one
+        entry, a location in every entry, and no more entries than the
+        protocol allows.
+      violated: >-
+        The sitemap does not meet the Sitemaps protocol's document
+        requirements: its media type, XML well-formedness, root element,
+        namespace, UTF-8 encoding, the presence of at least one located entry,
+        or the 50,000-entry ceiling. A consumer cannot read it as a sitemap.
+      not-present: >-
+        No sitemap is published: the conventional path is not served and
+        robots.txt declares no Sitemap record. The Sitemaps protocol is
+        opt-in, so its absence is not a defect.
+      indeterminate: >-
+        The sitemap was not read: the retrieval failed, the status was outside
+        the successful class, the body was cut at this scanner's size limit,
+        or the parse stopped at one of this scanner's own bounds.
+
+  - assertion: "sitemap.directive"
+    rule_id: "web.discovery.sitemap"
+    messages:
+      satisfied: >-
+        Either robots.txt declares no Sitemap record, in which case this
+        obligation never arises, or the record it declares is an absolute URL
+        that named a document this scan retrieved.
+      violated: >-
+        The Sitemap record in robots.txt is not an absolute URL, or the
+        document it names could not be retrieved. Either way a consumer that
+        starts discovery from robots.txt is left with nothing to fetch.
+      not-present: >-
+        No sitemap is published at all: the conventional path is not served
+        and robots.txt declares no Sitemap record, so there is no discovery
+        directive to follow.
+      indeterminate: >-
+        Whether robots.txt declares a Sitemap record could not be established,
+        or the document that record names was not retrieved to a readable
+        state, so the discovery step was not completed.
+
+  - assertion: "sitemap.canonical"
+    rule_id: "web.discovery.sitemap"
+    messages:
+      satisfied: >-
+        Every sitemap location is an absolute URL on this origin and under the
+        protocol's length limit, and every last-modified value present is a
+        W3C Datetime.
+      violated: >-
+        A sitemap entry carries a location that is relative, over the
+        protocol's length limit, or on another origin, or a last-modified
+        value that is not a W3C Datetime. Whether a timestamp is truthful is
+        not observable and is not claimed here.
+      not-present: >-
+        No sitemap is published, so there are no locations whose canonical
+        form could be judged.
+      indeterminate: >-
+        The sitemap entries were not all read, so no statement about the form
+        of the locations they carry would cover the whole document.
+
+  # ---------------------------------------------------------------------
+  # web.discovery.link
+  # ---------------------------------------------------------------------
+  - assertion: "links.parse"
+    rule_id: "web.discovery.link"
+    messages:
+      satisfied: >-
+        Every Link field line parsed under the RFC 8288 grammar, including
+        multiple field lines, commas between link-values, and quoted
+        parameters.
+      violated: >-
+        A Link field line does not match the RFC 8288 grammar. A conforming
+        parser stops at the syntax error, so the link-values after it are not
+        read at all.
+      not-present: >-
+        The page response carries no Link field. Web linking over HTTP is
+        optional, so not using it is not a defect.
+      indeterminate: >-
+        The Link field was not parsed: the page retrieval failed, or the parse
+        stopped at one of this scanner's own bounds. A bound of this scanner
+        says nothing about the field.
+
+  - assertion: "links.relation"
+    rule_id: "web.discovery.link"
+    messages:
+      satisfied: >-
+        Every parsed link-value carries a rel parameter whose relation types
+        are each a registered name or a URI, which are the two forms RFC 8288
+        defines.
+      violated: >-
+        A link-value carries no rel parameter, or a relation type that is
+        neither a registered name nor a URI. RFC 8288 makes rel mandatory and
+        fixes those two forms, so such a link states no relation at all.
+      not-present: >-
+        The page response carries no Link field, so there are no relation
+        types to interpret.
+      indeterminate: >-
+        The relation types could not be read, because the page retrieval
+        failed, the parse stopped at one of this scanner's own bounds, or a
+        syntax error ended it before the remaining link-values were reached.
+
+  - assertion: "links.agent-useful"
+    rule_id: "web.discovery.link"
+    messages:
+      satisfied: >-
+        At least one link-value whose context is this page advertises a
+        discovery relation named by this project's separately versioned
+        agent-useful relation policy.
+      violated: >-
+        No link-value whose context is this page advertises a discovery
+        relation named by this project's separately versioned agent-useful
+        relation policy. That policy is this project's own opinion about what
+        is worth an agent's attention, not a requirement of any standard.
+      not-present: >-
+        The page response carries no Link field, so there is nothing to
+        classify against this project's agent-useful relation policy.
+      indeterminate: >-
+        The link-values could not be read far enough to classify them, because
+        the page retrieval failed, the parse stopped at one of this scanner's
+        own bounds, or a syntax error ended it early.
+
+  # ---------------------------------------------------------------------
+  # web.content.markdown-negotiation
+  # ---------------------------------------------------------------------
+  - assertion: "markdown.media-type"
+    rule_id: "web.content.markdown-negotiation"
+    todo:
+      - >-
+        `not-present` is unreachable at rule_version 0.1.0: this rule always
+        plans its Markdown request, so there is always a response or an
+        indeterminate verdict about one.
+    messages:
+      satisfied: >-
+        The request that accepted text/markdown returned a successful response
+        labelled text/markdown, the media type RFC 7763 registers.
+      violated: >-
+        The request that accepted text/markdown did not return a successful
+        response labelled text/markdown. A representation is what its
+        Content-Type says it is, so Markdown bytes under another label are not
+        a Markdown representation.
+      not-present: >-
+        No Markdown representation was requested for this target, so there is
+        no labelled response whose media type could be judged.
+      indeterminate: >-
+        The text/markdown request produced no response this scan could read,
+        so the media type it would have carried is unknown.
+
+  - assertion: "markdown.negotiation"
+    rule_id: "web.content.markdown-negotiation"
+    todo:
+      - >-
+        `not-present` is unreachable at rule_version 0.1.0: this rule always
+        plans its HTML request, so there is always a response or an
+        indeterminate verdict about one.
+    messages:
+      satisfied: >-
+        The request that accepted HTML was not answered with Markdown, so this
+        origin served a representation the client actually asked for.
+      violated: >-
+        A request that accepted HTML was answered with a text/markdown
+        representation. Serving Markdown to a client that did not ask for it
+        is not content negotiation, and a client with no Markdown parser
+        receives something it cannot render.
+      not-present: >-
+        No HTML representation was requested, so there is no negotiated
+        response to judge.
+      indeterminate: >-
+        The HTML request produced no response this scan could read, so which
+        representation this origin selected for it is unknown.
+
+  - assertion: "markdown.vary"
+    rule_id: "web.content.markdown-negotiation"
+    todo:
+      - >-
+        `not-present` is unreachable at rule_version 0.1.0: this rule always
+        plans its Markdown request, so there is always a response or an
+        indeterminate verdict about one.
+    messages:
+      satisfied: >-
+        The Markdown response names Accept in Vary, so a shared cache cannot
+        hand it to a request that asked for a different representation.
+      violated: >-
+        The Markdown response does not name Accept in Vary. Vary is the field
+        that tells a cache which request headers selected this representation,
+        so without it a cache may serve the Markdown to a client that asked
+        for HTML.
+      not-present: >-
+        No Markdown representation was requested, so there is no response
+        whose Vary field could be read.
+      indeterminate: >-
+        The Markdown request produced no response this scan could read, so its
+        Vary field is unknown.
+
+  - assertion: "markdown.fidelity"
+    rule_id: "web.content.markdown-negotiation"
+    todo:
+      - >-
+        `not-present` is unreachable at rule_version 0.1.0: both requests are
+        always planned, so a comparison that cannot be made is reported as
+        indeterminate rather than as an absent mechanism.
+    messages:
+      satisfied: >-
+        Neither gross-loss condition this bounded structural proxy tests
+        fired: the Markdown carries a heading where the HTML has one, and it
+        contains the HTML title text. This is not a check that the two
+        representations say the same thing.
+      violated: >-
+        The Markdown representation drops structure the HTML carries: it has
+        no heading at all where the HTML has one, or it does not contain the
+        HTML title text. This is a bounded structural proxy, not a judgement
+        about meaning.
+      not-present: >-
+        Neither representation was requested, so there is nothing to compare.
+      indeterminate: >-
+        The two representations were not comparable: one was not retrieved
+        successfully, was not labelled with the media type expected of it, was
+        truncated, or was larger than this proxy reads. No fidelity comparison
+        was made.
+
+  # ---------------------------------------------------------------------
+  # web.policy.ai-crawler
+  # ---------------------------------------------------------------------
+  - assertion: "ai-rules.rep-parse"
+    rule_id: "web.policy.ai-crawler"
+    messages:
+      satisfied: >-
+        robots.txt decoded as UTF-8, so group selection and allow/disallow
+        precedence for a named product token resolve from the octets this
+        origin actually served.
+      violated: >-
+        robots.txt was not well-formed UTF-8. Product tokens and path patterns
+        then match replacement characters instead of what was written, so no
+        faithful RFC 9309 group selection exists for any crawler token.
+      not-present: >-
+        The origin answered /robots.txt with a client-error status, so there
+        is no document from which to resolve a group for any crawler token.
+      indeterminate: >-
+        The robots.txt was not read to the end, so group selection and
+        precedence were never resolved. That is a limit of this scan, not a
+        statement about the file.
+
+  - assertion: "ai-rules.token-source"
+    rule_id: "web.policy.ai-crawler"
+    messages:
+      satisfied: >-
+        The crawler token set behind this classification is this build's
+        pinned dataset, which carries its own version, its verification date,
+        and a source ledger identifier for every token.
+      violated: >-
+        The crawler token set behind this classification is not the pinned,
+        cited dataset, so the classification rests on tokens with no recorded
+        version and no recorded provenance.
+      not-present: >-
+        No robots.txt is published at this origin, so no token was classified
+        and no dataset is claimed beside a scan that observed nothing.
+      indeterminate: >-
+        The robots.txt was not read, so no token was classified and no dataset
+        is claimed beside a scan that reached no verdict.
+
+  - assertion: "ai-rules.effective-access"
+    rule_id: "web.policy.ai-crawler"
+    messages:
+      satisfied: >-
+        Every configured crawler token may reach the configured tested path
+        under RFC 9309 precedence, including the default decision where no
+        group matches that token.
+      violated: >-
+        At least one configured crawler token is disallowed from the
+        configured tested path under RFC 9309 precedence. The publisher is
+        entitled to that policy; this says an agent using that token cannot
+        reach the path, not that any specification was breached.
+      not-present: >-
+        The origin answered /robots.txt with a client-error status, so no
+        group exists and no effective access decision was computed.
+      indeterminate: >-
+        No effective access decision was computed: either the robots.txt was
+        not read, or no crawler token is configured, and an empty set of
+        decisions is reported as such rather than as a pass.
+
+  # ---------------------------------------------------------------------
+  # web.policy.content-signals
+  # ---------------------------------------------------------------------
+  - assertion: "content-signals.coverage"
+    rule_id: "web.policy.content-signals"
+    todo:
+      - >-
+        `violated` is unreachable at rule_version 0.2.0. A publisher cannot
+        breach this by omitting a dimension: the requirement is that an
+        omission is reported as an omission, which is this project's own
+        obligation. The template exists so renderMessage cannot fail if a
+        later rule version reaches the kind.
+    messages:
+      satisfied: >-
+        The Content-Signal declaration is reported as written. Dimensions it
+        omits are reported as omitted, and no unstated yes or no policy is
+        inferred for them.
+      violated: >-
+        A Content-Signal declaration was reported with a policy inferred for a
+        dimension it does not state. An omitted dimension carries no declared
+        preference in either direction.
+      not-present: >-
+        No Content-Signal declaration is published: either no robots.txt is
+        served, or the one served carries no Content-Signal record. This is an
+        optional mechanism that is not deployed.
+      indeterminate: >-
+        The Content-Signal declaration was not read, so no statement about
+        which dimensions it covers would be complete.
+
+  - assertion: "content-signals.effect"
+    rule_id: "web.policy.content-signals"
+    todo:
+      - >-
+        `violated` is unreachable at rule_version 0.2.0. This assertion is a
+        disclosure about how a declaration must be described, which is this
+        project's own obligation and not a target behaviour. The template
+        exists so renderMessage cannot fail if a later rule version reaches
+        the kind.
+    messages:
+      satisfied: >-
+        Disclosure: a Content-Signal declaration is a preference this
+        publisher stated. It is not consent, not a prohibition, and not
+        evidence that any recipient read it or honoured it.
+      violated: >-
+        A Content-Signal declaration was described as consent, as a
+        prohibition, or as verified recipient behaviour. It is a stated
+        preference, and nothing observed here can establish what any recipient
+        did with it.
+      not-present: >-
+        No Content-Signal declaration is published, so there is no stated
+        preference whose effect could be described.
+      indeterminate: >-
+        The Content-Signal declaration was not read, so there is no stated
+        preference whose effect could be described.
+
+  - assertion: "content-signals.conflicting-declaration"
+    rule_id: "web.policy.content-signals"
+    messages:
+      satisfied: >-
+        No signal token is declared more than once with differing values
+        inside one group, so every declared token has a single value.
+      violated: >-
+        The same signal token is declared more than once with differing values
+        inside one group. The pinned source defines no conflict resolution, so
+        the declaration is reported as unresolved and no winner is chosen.
+        This is ambiguity, not a breach of any specification.
+      not-present: >-
+        No Content-Signal declaration is published, so there is nothing that
+        could conflict.
+      indeterminate: >-
+        The Content-Signal declaration was not read, so a token repeated with
+        differing values could have gone unseen.
+
+  - assertion: "content-signals.unrecognized-vocabulary"
+    rule_id: "web.policy.content-signals"
+    messages:
+      satisfied: >-
+        The Content-Signal declaration uses only tokens the dated
+        compatibility snapshot recognizes, of which it names
+        {recognized-token-count}.
+      violated: >-
+        The Content-Signal declaration names a token outside the set the dated
+        compatibility snapshot recognizes, or names none of that set at all;
+        it names {recognized-token-count} recognized tokens. This is
+        unrecognized by this project's pinned sources and is not a violation
+        of any specification.
+      not-present: >-
+        No Content-Signal declaration is published, so no vocabulary was read.
+      indeterminate: >-
+        The Content-Signal declaration was not read, so its vocabulary is
+        unknown and an unrecognized token could have gone unseen.
+
+  # ---------------------------------------------------------------------
+  # agent.discovery.skills
+  # ---------------------------------------------------------------------
+  - assertion: "skills.path-schema"
+    rule_id: "agent.discovery.skills"
+    messages:
+      satisfied: >-
+        The skills index is served at the v0.2.0 well-known path and is a JSON
+        object carrying the schema identifier and document shape that version
+        defines.
+      violated: >-
+        The v0.2.0 skills index is not served in the form the pinned draft
+        defines: the document is not valid JSON, is not an object, or does not
+        carry the v0.2.0 schema identifier and shape. Serving only the pre-v0.2
+        path is the same outcome, because a v0.2 consumer does not look there.
+      not-present: >-
+        Neither the v0.2.0 skills index path nor the pre-v0.2 path is served,
+        so this optional discovery mechanism is not deployed.
+      indeterminate: >-
+        The skills index was not read: the retrieval failed, the status was
+        outside the successful class, the body was truncated, or it was larger
+        than this scan reads.
+
+  - assertion: "skills.entry"
+    rule_id: "agent.discovery.skills"
+    messages:
+      satisfied: >-
+        Every entry in the skills index carries a name, an allowed type, a
+        description, a URL and a digest in the syntax v0.2.0 requires of each.
+      violated: >-
+        An entry in the skills index omits a field v0.2.0 requires, or carries
+        one whose value is outside the syntax that version defines for it. A
+        consumer validating the index against the draft rejects it.
+      not-present: >-
+        No skills index is served, so there are no entries to validate.
+      indeterminate: >-
+        The entries were not validated, because the index itself could not be
+        read as a v0.2.0 document.
+
+  - assertion: "skills.digest"
+    rule_id: "agent.discovery.skills"
+    messages:
+      satisfied: >-
+        Every declared digest is a lowercase hexadecimal SHA-256 value of the
+        length v0.2.0 requires. This scan fetched no artifact, so no digest
+        was compared against bytes.
+      violated: >-
+        A declared digest is not a lowercase hexadecimal SHA-256 value of the
+        length v0.2.0 requires, so it could not match any artifact even if one
+        were fetched.
+      not-present: >-
+        No skills index is served, so there are no declared digests.
+      indeterminate: >-
+        The declared digests were not read, because the index itself could not
+        be read as a v0.2.0 document.
+
+  # ---------------------------------------------------------------------
+  # web.discovery.api-catalog
+  # ---------------------------------------------------------------------
+  - assertion: "api-catalog.discovery"
+    rule_id: "web.discovery.api-catalog"
+    messages:
+      satisfied: >-
+        The well-known API catalog resource RFC 9727 defines was served
+        successfully with the application/linkset+json media type.
+      violated: >-
+        The well-known API catalog resource was served, but not with the
+        application/linkset+json media type RFC 9727 requires, so a consumer
+        following the RFC will not read it as a catalog.
+      not-present: >-
+        No API catalog is served at the well-known resource RFC 9727 defines.
+        The mechanism is opt-in and its absence is not a defect.
+      indeterminate: >-
+        The well-known API catalog resource produced no representation this
+        scan could read: the retrieval failed, the status was outside the
+        successful class, or the body was cut at this scanner's size limit.
+
+  - assertion: "api-catalog.linkset"
+    rule_id: "web.discovery.api-catalog"
+    messages:
+      satisfied: >-
+        The catalog document parses as an RFC 9264 linkset: a JSON object with
+        a linkset array whose members each carry an anchor and well-formed
+        link context objects.
+      violated: >-
+        The catalog document is not a valid RFC 9264 linkset: it is not JSON,
+        not an object, carries no linkset array, or a member is missing its
+        anchor or carries a malformed link context object.
+      not-present: >-
+        No API catalog is served, so there is no linkset document to validate.
+      indeterminate: >-
+        The linkset syntax was not judged, because the catalog document was
+        not retrieved as a readable application/linkset+json representation.
+
+  - assertion: "api-catalog.relations"
+    rule_id: "web.discovery.api-catalog"
+    messages:
+      satisfied: >-
+        The linkset carries at least one link to an API endpoint under a
+        relation RFC 9727 uses for that purpose.
+      violated: >-
+        The linkset carries no link to an API endpoint: it is empty, or every
+        member uses a relation that names something other than an API. RFC
+        9727 requires the catalog to include hyperlinks to API endpoints, so a
+        catalog without one discovers nothing.
+      not-present: >-
+        No API catalog is served, so there are no relations to require.
+      indeterminate: >-
+        The relations were not judged, because the catalog document could not
+        be read as a valid linkset.
+
+  - assertion: "api-catalog.profile"
+    rule_id: "web.discovery.api-catalog"
+    messages:
+      satisfied: >-
+        The catalog response declares the RFC 9727 profile URI in the profile
+        parameter of its media type.
+      violated: >-
+        The catalog response does not declare the RFC 9727 profile URI in the
+        profile parameter of its media type, so a consumer cannot tell from
+        the media type alone that this linkset is an API catalog.
+      not-present: >-
+        No API catalog is served, so there is no media type whose profile
+        parameter could be read.
+      indeterminate: >-
+        The profile parameter was not read, because the catalog document was
+        not retrieved as a readable representation.

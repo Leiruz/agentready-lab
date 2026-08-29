@@ -29,6 +29,31 @@ import { skillsRule } from "./rules/skills.js";
  */
 export const RULES_STANDARD_PACKAGE_VERSION = "0.0.0";
 
+/**
+ * The pinned artifacts a scan cites, projected from `specs/` at build time.
+ *
+ * They live in this package because they are the ruleset these rules belong
+ * to: the assertion set the engine validates each rule against, the source
+ * ledger a finding's citations resolve in, and the message and remediation
+ * prose the core renders. `packages/cli` composes them into a `ScanInput` and
+ * derives none of them, which is what `docs/ARCHITECTURE.md` section 4 means
+ * by "package composition only".
+ *
+ * `src/generated/pinned-artifacts.ts` is written by `pnpm specs:canonicalise`
+ * and held current by `pnpm specs:validate`.
+ */
+export {
+  PINNED_ASSERTIONS,
+  PINNED_PROFILE_VERSIONS,
+  PINNED_REMEDIATION,
+  PINNED_REMEDIATION_VERSION,
+  PINNED_RULESET,
+  PINNED_SOURCE_LEDGER,
+  PINNED_SOURCE_LEDGER_VERSION,
+  PINNED_TEMPLATES,
+  PINNED_TEMPLATES_VERSION,
+} from "./generated/pinned-artifacts.js";
+
 export { aiCrawlerRule } from "./rules/ai-crawler.js";
 export { apiCatalogRule } from "./rules/api-catalog.js";
 export { contentSignalsRule } from "./rules/content-signals.js";

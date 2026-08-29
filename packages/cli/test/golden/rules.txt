@@ -1,0 +1,11 @@
+agentready-lab rules - inspect the pinned ruleset
+
+USAGE
+  agentready-lab rules <subcommand> [options]
+
+SUBCOMMANDS
+  list                   List the rules in the pinned ruleset.
+  explain <rule-id>      Print one rule's pinned metadata and assertions.
+
+OPTIONS
+  -h, --help             Print help for a subcommand and exit 0.

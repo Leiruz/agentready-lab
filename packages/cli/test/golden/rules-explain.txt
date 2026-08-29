@@ -1,0 +1,16 @@
+agentready-lab rules explain - print one rule's pinned metadata
+
+USAGE
+  agentready-lab rules explain <rule-id> [options]
+
+ARGUMENTS
+  <rule-id>              An exact rule id, such as web.discovery.robots. A
+                         selector is not accepted here: this command explains
+                         one rule.
+
+OPTIONS
+  -h, --help             Print this help and exit 0.
+
+The assertions, requirement classes and source references printed here are read
+from the rule's pinned metadata. They are what a finding may cite; they are not
+a claim that the rule is implemented.

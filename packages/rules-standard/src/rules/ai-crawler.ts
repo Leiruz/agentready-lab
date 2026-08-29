@@ -28,8 +28,9 @@ import {
  * `source_ledger_version` 0.4.0, under the ADR-0002 section 10 mapping.
  * `test/registry.test.ts` re-reads both files and compares, so a value edited
  * here without the spec is a test failure rather than a silent divergence.
- * `implementationStatus` stays `planned` for that reason: the ruleset is the
- * authority for it and this change does not edit `specs/`.
+ * `implementationStatus` moved to `supported` when the ruleset's
+ * `implementation_status` did; the ruleset is the authority for it and the two
+ * are held equal by that test.
  *
  * WHAT THIS RULE REPORTS, AND WHAT IT REFUSES TO REPORT. It reads the one
  * shared `/robots.txt` observation, resolves the RFC 9309 group for each
@@ -429,7 +430,7 @@ export const aiCrawlerRule: RuleDefinition = {
     modes: ["spec"],
     observationRuntime: ["http"],
     sourceMaturity: "mixed",
-    implementationStatus: "planned",
+    implementationStatus: "supported",
     sources: [
       {
         id: "isit-2026-08-28",

@@ -1,0 +1,21 @@
+agentready-lab - conformance and interoperability checks for agent-facing web mechanisms
+
+USAGE
+  agentready-lab <command> [options]
+
+COMMANDS
+  check <url>            Scan one exact loopback origin.
+  rules list             List the rules in the pinned ruleset.
+  rules explain <id>     Print one rule's pinned metadata and assertions.
+
+OPTIONS
+  -h, --help             Print help for a command and exit 0.
+
+EXIT CODES
+  0  Completed with no failure under the selected strictness policy.
+  1  A selected rule failed, or strict mode promoted a warning or unable result.
+  2  Invalid argument, configuration, profile, selector, or unsupported combination.
+  3  The scan as a whole could not safely continue.
+  4  An internal invariant was violated.
+
+Run 'agentready-lab <command> --help' for the options of one command.

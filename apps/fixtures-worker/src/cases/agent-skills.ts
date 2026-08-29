@@ -104,7 +104,7 @@ export const agentSkillsCases: readonly FixtureDefinition[] = [
     overrides: {
       [SKILLS_INDEX_PATH]: text(
         JSON_TYPE,
-        skillsIndex([{ ...BASE_SKILL_ENTRY, sha256: "SHA1:D6B0EF7410" }]),
+        skillsIndex([{ ...BASE_SKILL_ENTRY, digest: "SHA1:D6B0EF7410" }]),
       ),
     },
     todos: [ASSERTIONS_UNASSIGNED],

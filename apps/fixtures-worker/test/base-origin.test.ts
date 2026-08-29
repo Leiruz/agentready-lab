@@ -301,7 +301,7 @@ describe("overrides change only what they declare", () => {
   it("skl-007 serves artifact bytes that do not match the declared digest", async () => {
     const serve = handlerFor("skl-007");
     const index: {
-      readonly skills: readonly { readonly sha256: string }[];
+      readonly skills: readonly { readonly digest: string }[];
     } = await serve(
       new Request(`${ORIGIN}/.well-known/agent-skills/index.json`),
     ).json();

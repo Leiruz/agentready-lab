@@ -23,8 +23,9 @@ import {
  * `source_ledger_version` 0.4.0, under the ADR-0002 section 10 mapping.
  * `test/registry.test.ts` re-reads both files and compares, so a value edited
  * here without the spec is a test failure rather than a silent divergence.
- * `implementationStatus` stays `planned` for that reason: the ruleset is the
- * authority for it and this change does not edit `specs/`.
+ * `implementationStatus` moved to `supported` when the ruleset's
+ * `implementation_status` did; the ruleset is the authority for it and the two
+ * are held equal by that test.
  *
  * WHAT EACH ASSERTION MEANS, and where in RFC 9309 it comes from. The ruleset
  * declares no parameters and authorizes no excerpt for any of the three, so
@@ -179,7 +180,7 @@ export const robotsRule: RuleDefinition = {
     modes: ["spec"],
     observationRuntime: ["http"],
     sourceMaturity: "stable",
-    implementationStatus: "planned",
+    implementationStatus: "supported",
     sources: [
       {
         id: "isit-2026-08-28",

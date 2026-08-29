@@ -24,8 +24,8 @@ import { mediaTypeParameter, parseMediaType } from "../parsers/media-type.js";
  * `source_ledger_version` 0.4.0, under the ADR-0002 section 10 mapping.
  * `test/registry.test.ts` re-reads both files and compares, so a value edited
  * here without the spec is a test failure rather than a silent divergence.
- * `implementationStatus` therefore still reads `planned`: the ruleset says so,
- * and this file is not the place to contradict it.
+ * `implementationStatus` reads `supported` because the ruleset now says so;
+ * this file follows it rather than deciding it.
  *
  * TWO THINGS THIS RULE CANNOT DO, both recorded rather than worked around.
  *
@@ -385,7 +385,7 @@ export const apiCatalogRule: RuleDefinition = {
     modes: ["spec"],
     observationRuntime: ["http"],
     sourceMaturity: "stable",
-    implementationStatus: "planned",
+    implementationStatus: "supported",
     sources: [
       {
         id: "isit-2026-08-28",

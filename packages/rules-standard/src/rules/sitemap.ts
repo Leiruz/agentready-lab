@@ -607,7 +607,7 @@ export const sitemapRule: RuleDefinition = {
     modes: ["spec"],
     observationRuntime: ["http"],
     sourceMaturity: "stable",
-    implementationStatus: "planned",
+    implementationStatus: "supported",
     sources: [
       {
         id: "isit-2026-08-28",

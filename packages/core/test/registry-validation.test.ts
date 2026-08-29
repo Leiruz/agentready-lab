@@ -28,6 +28,10 @@ const LEDGER = readSpec("sources.v0.yaml");
 const LEDGER_SCHEMA = readSpec("sources.schema.json");
 const RULESET = readSpec("ruleset.standard.v0.yaml");
 const RULESET_SCHEMA = readSpec("ruleset.schema.json");
+const REMEDIATION = readSpec("remediation.v0.yaml");
+const REMEDIATION_SCHEMA = readSpec("remediation.schema.json");
+const TEMPLATES = readSpec("templates.v0.yaml");
+const TEMPLATES_SCHEMA = readSpec("templates.schema.json");
 
 const SNAPSHOT_CANONICAL = readSpec("checks.v0.canonical.json");
 const SNAPSHOT_DIGEST = readSpec("checks.v0.digest.txt");
@@ -85,11 +89,13 @@ describe("the network sentinel itself", () => {
 // Harness
 // ---------------------------------------------------------------------------
 
-/** One of the three authorities, replaced; the other two as committed. */
+/** One of the five files, replaced; the others as committed. */
 interface Override {
   readonly snapshotYaml?: string;
   readonly ledgerYaml?: string;
   readonly rulesetYaml?: string;
+  readonly remediationYaml?: string;
+  readonly templatesYaml?: string;
 }
 
 async function run(override: Override = {}): Promise<RegistryValidationResult> {
@@ -100,6 +106,10 @@ async function run(override: Override = {}): Promise<RegistryValidationResult> {
     ledgerSchemaJson: LEDGER_SCHEMA,
     rulesetYaml: override.rulesetYaml ?? RULESET,
     rulesetSchemaJson: RULESET_SCHEMA,
+    remediationYaml: override.remediationYaml ?? REMEDIATION,
+    remediationSchemaJson: REMEDIATION_SCHEMA,
+    templatesYaml: override.templatesYaml ?? TEMPLATES,
+    templatesSchemaJson: TEMPLATES_SCHEMA,
     committed: null,
   });
 }
@@ -126,6 +136,10 @@ describe("specs/ as committed", () => {
       ledgerSchemaJson: LEDGER_SCHEMA,
       rulesetYaml: RULESET,
       rulesetSchemaJson: RULESET_SCHEMA,
+      remediationYaml: REMEDIATION,
+      remediationSchemaJson: REMEDIATION_SCHEMA,
+      templatesYaml: TEMPLATES,
+      templatesSchemaJson: TEMPLATES_SCHEMA,
       committed: {
         snapshot: {
           canonicalJson: SNAPSHOT_CANONICAL,
@@ -827,6 +841,10 @@ describe("mutations of the three authorities", () => {
       ledgerSchemaJson: LEDGER_SCHEMA,
       rulesetYaml: RULESET,
       rulesetSchemaJson: RULESET_SCHEMA,
+      remediationYaml: REMEDIATION,
+      remediationSchemaJson: REMEDIATION_SCHEMA,
+      templatesYaml: TEMPLATES,
+      templatesSchemaJson: TEMPLATES_SCHEMA,
       committed: {
         snapshot: {
           canonicalJson: `${SNAPSHOT_CANONICAL} `,
@@ -885,6 +903,10 @@ describe("hostile and malformed input", () => {
       ledgerSchemaJson: LEDGER_SCHEMA,
       rulesetYaml: RULESET,
       rulesetSchemaJson: RULESET_SCHEMA,
+      remediationYaml: REMEDIATION,
+      remediationSchemaJson: REMEDIATION_SCHEMA,
+      templatesYaml: TEMPLATES,
+      templatesSchemaJson: TEMPLATES_SCHEMA,
       committed: null,
     });
     expect(codesOf(result.issues)).toStrictEqual(["schema-unreadable"]);
@@ -896,5 +918,242 @@ describe("hostile and malformed input", () => {
     );
     expect(codes).toContain("unexpected-check-count");
     expect(codes).toContain("schema-violation");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Remediation coverage
+//
+// ADR-0007 section 3 makes the section 24 release criterion "every rule has
+// pinned sources and independent remediation text" a failing build rather than
+// a checklist line, and `runScan` refuses a scan with `remediation-missing`
+// before a socket opens. These mutations are what make that claim testable:
+// each one is the specific defect a check exists to catch, written into a copy
+// of the committed file.
+// ---------------------------------------------------------------------------
+
+/** The whole `entries` element for one finding code. */
+function entryFor(code: string): string {
+  const start = REMEDIATION.indexOf(`  - finding_code: "${code}"\n`);
+  expect(start).toBeGreaterThan(-1);
+  const next = REMEDIATION.indexOf("\n  - finding_code:", start + 1);
+  const end = next === -1 ? REMEDIATION.length : next + 1;
+  return REMEDIATION.slice(start, end);
+}
+
+/** A copy of the committed file with one more entry, cloned from `robots.location`. */
+function withExtraEntry(
+  code: string,
+  ruleId: string,
+  entryClass = "required-correction",
+): string {
+  const clone = entryFor("robots.location")
+    .replace('finding_code: "robots.location"', `finding_code: "${code}"`)
+    .replace('rule_id: "web.discovery.robots"', `rule_id: "${ruleId}"`)
+    .replace('class: "required-correction"', `class: "${entryClass}"`);
+  return `${REMEDIATION}${clone}`;
+}
+
+describe("remediation covers exactly the assertions that can produce a finding", () => {
+  it("covers all 27 active cited M1 assertions and nothing else", async () => {
+    // Twenty-eight assertions carry citations across the eight M1 rules;
+    // ADR-0010 defers the twenty-eighth. The other fourteen rules cite
+    // nothing, so no scan can configure them and none is owed text here.
+    expect(REMEDIATION.match(/^ {2}- finding_code:/gm)).toHaveLength(27);
+    expect(REMEDIATION).not.toContain('finding_code: "skills.archive-safety"');
+    expect(await validate()).toStrictEqual([]);
+  });
+
+  it("classes every entry by its assertion's strength, never by choice", () => {
+    // Fifteen normative assertions, and twelve recommended or advisory ones. A
+    // fail can never carry recommended-hardening, and the ruleset declares no
+    // compat assertion, so nothing here carries a compatibility-workaround.
+    expect(REMEDIATION.match(/class: "required-correction"/g)).toHaveLength(15);
+    expect(REMEDIATION.match(/class: "recommended-hardening"/g)).toHaveLength(
+      12,
+    );
+    expect(REMEDIATION).not.toContain('class: "compatibility-workaround"');
+  });
+
+  it("rejects a missing entry for an active assertion", async () => {
+    const mutated = REMEDIATION.replace(entryFor("markdown.media-type"), "");
+    expect(mutated).not.toBe(REMEDIATION);
+    const issues = await validate({ remediationYaml: mutated });
+    expect(codesOf(issues)).toStrictEqual(["remediation-missing"]);
+    expect(issues[0]?.message).toContain('"markdown.media-type"');
+  });
+
+  it("rejects an entry for an assertion no rule declares", async () => {
+    const issues = await validate({
+      remediationYaml: withExtraEntry(
+        "robots.invented",
+        "web.discovery.robots",
+      ),
+    });
+    expect(codesOf(issues)).toStrictEqual(["remediation-unknown-assertion"]);
+    expect(issues[0]?.message).toContain('"robots.invented"');
+  });
+
+  it("rejects an entry for the deferred assertion", async () => {
+    // ADR-0010 section 4: declared, never evaluated, so it can produce no
+    // finding, so remediating it would be advice about a verdict that is
+    // unreachable.
+    const issues = await validate({
+      remediationYaml: withExtraEntry(
+        "skills.archive-safety",
+        "agent.discovery.skills",
+        "recommended-hardening",
+      ),
+    });
+    expect(codesOf(issues)).toStrictEqual([
+      "remediation-for-deferred-assertion",
+    ]);
+    expect(issues[0]?.message).toContain("ADR-0010");
+  });
+
+  it("rejects an entry for a retired assertion", async () => {
+    // ADR-0009 retired content-signals.syntax and nothing normative replaced
+    // it. An entry for it would be remediation for a requirement this project
+    // stopped making.
+    const issues = await validate({
+      remediationYaml: withExtraEntry(
+        "content-signals.syntax",
+        "web.policy.content-signals",
+      ),
+    });
+    expect(codesOf(issues)).toStrictEqual([
+      "remediation-for-retired-assertion",
+    ]);
+    expect(issues[0]?.message).toContain("ADR-0009");
+  });
+
+  it("rejects a class the assertion's strength does not support", async () => {
+    // markdown.vary is `recommended`, so a violation derives `warning`.
+    // Calling its fix a required correction claims a conformance defect the
+    // status itself denies.
+    const mutated = REMEDIATION.replace(
+      entryFor("markdown.vary"),
+      entryFor("markdown.vary").replace(
+        'class: "recommended-hardening"',
+        'class: "required-correction"',
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    const issues = await validate({ remediationYaml: mutated });
+    expect(codesOf(issues)).toStrictEqual(["remediation-class-mismatch"]);
+    expect(issues[0]?.message).toContain("recommended");
+  });
+
+  it("rejects the same mismatch in the other direction", async () => {
+    // robots.location is `normative`, so a violation derives `fail`, and a
+    // `fail` must never carry recommended-hardening.
+    const mutated = REMEDIATION.replace(
+      entryFor("robots.location"),
+      entryFor("robots.location").replace(
+        'class: "required-correction"',
+        'class: "recommended-hardening"',
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["remediation-class-mismatch"],
+    );
+  });
+
+  it("rejects an entry filed under the wrong rule", async () => {
+    const mutated = REMEDIATION.replace(
+      entryFor("sitemap.canonical"),
+      entryFor("sitemap.canonical").replace(
+        'rule_id: "web.discovery.sitemap"',
+        'rule_id: "web.discovery.robots"',
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["remediation-rule-mismatch"],
+    );
+  });
+
+  it("rejects the same finding code twice", async () => {
+    const mutated = `${REMEDIATION}${entryFor("robots.location")}`;
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["duplicate-finding-code"],
+    );
+  });
+
+  it("rejects a citation the assertion does not rest on", async () => {
+    // ADR-0007 section 4: remediation may not drift away from the requirement
+    // it explains. rfc8288 is a real ledger source and robots.location does
+    // not rest on it, so this is drift rather than an unresolved identifier.
+    const mutated = REMEDIATION.replace(
+      entryFor("robots.location"),
+      entryFor("robots.location").replace(
+        'source_refs: ["rfc9309"]',
+        'source_refs: ["rfc9309", "rfc8288"]',
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["remediation-source-drift"],
+    );
+  });
+
+  it("rejects a citation the ledger does not declare", async () => {
+    const mutated = REMEDIATION.replace(
+      entryFor("robots.location"),
+      entryFor("robots.location").replace(
+        'source_refs: ["rfc9309"]',
+        'source_refs: ["rfc-invented"]',
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["unresolved-source-ref"],
+    );
+  });
+
+  it("rejects text written against a different ruleset version", async () => {
+    const mutated = REMEDIATION.replace(
+      'ruleset_version: "0.4.0"',
+      'ruleset_version: "0.3.0"',
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["remediation-ruleset-mismatch"],
+    );
+  });
+
+  it("rejects a duplicate key rather than letting the last one win", async () => {
+    const mutated = REMEDIATION.replace(
+      '  - finding_code: "robots.syntax"\n',
+      '  - finding_code: "robots.syntax"\n    finding_code: "robots.syntax"\n',
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toStrictEqual(
+      ["yaml-parse-error"],
+    );
+  });
+
+  it("bounds at 240 characters the summary that enters the report", async () => {
+    const mutated = REMEDIATION.replace(
+      entryFor("robots.location"),
+      entryFor("robots.location").replace(
+        "    summary: >-\n",
+        `    summary: "${"x".repeat(241)}"\n    unused: >-\n`,
+      ),
+    );
+    expect(mutated).not.toBe(REMEDIATION);
+    expect(codesOf(await validate({ remediationYaml: mutated }))).toContain(
+      "schema-violation",
+    );
+  });
+
+  it("prints every entry that says its pinned source prescribes no fix", async () => {
+    const open = (await run()).notes.filter(
+      (note) =>
+        note.code === "open-todo" &&
+        note.location.startsWith("specs/remediation.v0.yaml"),
+    );
+    expect(open).toHaveLength(6);
   });
 });

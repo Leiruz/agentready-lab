@@ -49,9 +49,14 @@ describe("the generated per-rule implementation-status table", () => {
     // ADR-0008 section 3: `PROJECT_STATUS.md` is a summary and never a
     // competing source of truth. Claiming a rule is `supported` while the
     // ruleset says `planned` is exactly the drift the gate exists to stop.
+    //
+    // The row is one of the fourteen rules outside M1, whose assertions cite
+    // no source yet and which therefore cannot be implemented before that
+    // changes. An M1 row would make this test fail on the day its rule was
+    // finished, which is a true status change and not drift.
     const drifted = STATUS.replace(
-      "| `web.policy.ai-crawler` | 0.2.0 | planned | mixed |",
-      "| `web.policy.ai-crawler` | 0.2.0 | supported | mixed |",
+      "| `commerce.payment.ap2` | 0.1.0 | planned | experimental |",
+      "| `commerce.payment.ap2` | 0.1.0 | supported | experimental |",
     );
     expect(drifted).not.toBe(STATUS);
     expect(spliceStatusTable(drifted, renderStatusTable(RULESET))).not.toBe(

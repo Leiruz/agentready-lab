@@ -20,7 +20,9 @@ URL is re-verified.
 | `ruleset.standard.v0.yaml` | What does this project's executable ruleset assert? | `ruleset_version` | `ruleset.schema.json` |
 
 `../docs/STANDARDS_REGISTRY.md` is the human-readable audit and maintenance
-guide.
+guide. Two further files carry prose keyed by the ruleset's assertion ids and
+answer none of the three questions: `remediation.v0.yaml` and
+`templates.v0.yaml`, both described below.
 
 ### How they join
 
@@ -37,6 +39,84 @@ The three files join on `rule_id` and on source identifier.
   is either declared by the ruleset or listed in that rule's
   `retired_requirements`. Dropping one silently is a validation failure;
   retiring one needs an entry naming the accepted ADR that retired it.
+
+### The fourth and fifth files, which are not further authorities
+
+`remediation.v0.yaml`, governed by `remediation.schema.json`, holds what this
+project tells a site operator to change. ADR-0007 section 2 keeps it out of the
+other three because it answers none of their questions: it makes no claim about
+a third party, declares no assertion, and pins no source. It is prose keyed by
+finding code, which for a `spec`-mode finding is a `spec.requirements` id and
+for a `compat`-mode finding is the rule's own versioned compatibility assertion
+id.
+
+It has its own axis, `remediation_version`, and no digest, for the reason the
+ledger has none: it decides no verdict, so there is nothing for a report to pin
+it by. Only `class` and `summary` reach a report. `detail` is surfaced by the
+human reporter and by `agentready-lab rules explain <rule-id>`.
+
+`templates.v0.yaml`, governed by `templates.schema.json`, holds the static
+finding prose ADR-0002 section 6 requires, keyed by assertion id and outcome
+kind. It is separate for the same reasons: it declares no assertion, pins no
+source, and changes when a human rewrites prose. Its axis is
+`templates_version`, and it has no digest.
+
+A rule may not construct a message. It reports an outcome kind and typed
+parameters, and `renderMessage` in `packages/core` looks the prose up in this
+table and substitutes only the parameters the assertion declares. Every
+character of a template is fixed at build time, so the only value in a finding
+message that can vary is a declared parameter the core sanitizes and bounds:
+the prose names the condition and the evidence entry carries what the target
+served. Exactly one M1 assertion declares a parameter, so every other template
+is parameterless.
+
+All four outcome kinds are required for every entry, not only the kinds a rule
+body currently reaches. `renderMessage` throws on a kind it has no entry for,
+which would abort a scan part-way through on whatever the target happened to
+serve, and nothing readable from `specs/` can say which kinds a compiled rule
+produces. Where a rule version reaches no such kind the entry records it in its
+own `todo`.
+
+This is forbidden:
+
+- prose that varies with anything but a declared parameter, including a header
+  value, a URL, a body excerpt, or an exception;
+- a `{slot}` naming a parameter the assertion does not declare, or one it
+  declares as not required;
+- an `indeterminate` template that says the target failed. It says this scan
+  could not reach a verdict and why; a bound of this scanner, a transport
+  error, or a status outside the successful class is not a conformance defect;
+- a `not-present` template that reads as a failure. Absence of an optional
+  mechanism is not one.
+
+`class` is fixed by the assertion's `strength` rather than chosen per entry,
+because `strength` is what decides whether a violation derives `fail` or
+`warning`:
+
+| `strength` in the ruleset | Derived status | `class` |
+| --- | --- | --- |
+| `normative` | `fail` | `required-correction` |
+| `recommended`, `advisory` | `warning` | `recommended-hardening` |
+| a `compat_assertions` entry | `fail` | `compatibility-workaround` |
+
+This is forbidden:
+
+- copying or paraphrasing IsItAgentReady's remediation text, or any other
+  scanner's;
+- generating the text at scan time, or at any time without a human author;
+- text that tells the user to disable, exclude, or downgrade the check;
+- text naming a specific commercial product as the fix;
+- text asserting a legal, contractual, or enforceability consequence;
+- inventing a prescriptive fix where the pinned source does not supply one. Say
+  so in `detail` and record a `todo` instead. Six entries do.
+
+Coverage is mechanical rather than a maintained list of rules: an assertion
+that cites at least one source and is not deferred can be configured, so it is
+owed an entry, and `pnpm run specs:validate` fails without one. That is
+currently the 27 active assertions of the eight M1 rules. `skills.archive-safety`
+is deferred and owed nothing, and the fourteen rules whose assertions still
+carry the `source_refs` todo are refused before a scan for that reason, so they
+have no entries and will demand them on the day their citations land.
 
 ### What the snapshot is, and is not
 
@@ -84,6 +164,12 @@ own `schema_version` for its data shape. Above that:
   provenance-only changes that alter no verdict, and `ledger_date` dates the
   revision so the ledger bounds its own verification dates rather than
   borrowing the snapshot's;
+- `templates_version` versions the finding message templates, on the same
+  reasoning as `remediation_version` below and with no clock of its own;
+- `remediation_version` versions the remediation prose, which changes when a
+  human rewrites it and not when a rule does. It declares no clock of its own,
+  so each entry's `authored_at` is checked for shape and for being a real
+  calendar date and is bounded by nothing;
 - `ruleset_id` and `ruleset_version` identify the immutable executable
   interpretation a scan reports;
 - each ruleset rule's `rule_version` identifies that rule's semantics;
@@ -192,7 +278,7 @@ and security considerations.
 `pnpm run specs:canonicalise` is the same run with permission to rewrite its
 generated output:
 
-1. parse all three files with duplicate-key rejection and bounded alias
+1. parse all four files with duplicate-key rejection and bounded alias
    expansion;
 2. validate each against its JSON Schema Draft 2020-12 contract;
 3. enforce the semantic constraints JSON Schema cannot express here:
@@ -213,8 +299,27 @@ generated output:
    - every date is a real calendar date, no snapshot date is after
      `snapshot.captured_at`, and no ledger `verified_at` is after the ledger's
      own `ledger_date`, which may not itself precede the newest `verified_at`;
-4. serialize the two canonical projections and verify the committed artifacts
-   are current.
+4. join `remediation.v0.yaml` and `templates.v0.yaml` to the ruleset:
+   - every active cited assertion has exactly one entry, and no `finding_code`
+     appears twice;
+   - no entry names an assertion the ruleset does not declare, one it defers,
+     one it retired, or one that still cites no source;
+   - each entry's `class` is the one its assertion's `strength` requires, and
+     its `rule_id` is the rule that declares the assertion;
+   - each entry's `source_refs` resolve in the ledger and are a subset of what
+     the assertion cites, so remediation cannot rest on a source the
+     requirement it explains does not rest on;
+   - `ruleset_id` and `ruleset_version` match the ruleset's;
+   - every active cited assertion has exactly one template entry carrying all
+     four outcome kinds, and no `assertion` appears twice;
+   - no template entry names an assertion the ruleset does not declare, one it
+     defers, one it retired, or one that still cites no source, and each
+     entry's `rule_id` is the rule that declares the assertion;
+   - every `{slot}` in every template names a parameter the assertion declares
+     and declares `required`, so no message can ask for a value the ruleset
+     never bounded and none can fail to render;
+5. serialize the two canonical projections, project `specs/` into the pinned
+   artifacts module, and verify the committed generated artifacts are current.
 
 Additions, retirements, changed requirement text, `rule_version` differences
 between the snapshot and the ruleset, and every recorded `todo` are printed as
@@ -233,11 +338,21 @@ rewriting the files or changing CI verdicts.
 | --- | --- | --- |
 | `checks.v0.canonical.json`, `checks.v0.digest.txt` | `snapshot.captured_at` and the snapshot's per-check verdict-bearing fields | the seal that proves the frozen file was not edited |
 | `ruleset.standard.v0.canonical.json`, `ruleset.standard.v0.digest.txt` | the ruleset's identity and its per-rule verdict-bearing fields | the ruleset digest a report carries |
+| `../packages/rules-standard/src/generated/pinned-artifacts.ts` | the ruleset's assertions, the source ledger, the templates and the remediation summaries | what a scan cites, compiled in so no YAML parser or filesystem is needed at run time |
 
-Each projection excludes what cannot change a verdict: titles, prose deltas,
-caveats, and `interop`. Fixing a typo in a caveat must not invalidate every
-pinned report. The ledger has no digest; ADR-0007 puts `sourceLedgerVersion` in
-the report instead.
+`pinned-artifacts.ts` exists because a scan must not parse YAML. `yaml` is a
+devDependency, a runtime parser for a format with aliases and tags does not
+belong in the scan path, and a filesystem read would stop the packages working
+in a Worker. So the projection runs once, at `pnpm specs:canonicalise` time,
+and `pnpm specs:validate` recomputes it and fails on any difference: a drifted
+module fails CI rather than shipping. It deliberately does not project
+`checks.v0.yaml`, which is never read at scan time.
+
+Each canonical projection excludes what cannot change a verdict: titles, prose
+deltas, caveats, and `interop`. Fixing a typo in a caveat must not invalidate every
+pinned report. Neither the ledger nor the remediation file has a digest;
+ADR-0007 puts `sourceLedgerVersion` in the report instead, and remediation
+decides no verdict at all.
 
 ## Change procedure
 
@@ -246,11 +361,14 @@ the report instead.
 3. Cite the exact source section or schema and classify each assertion as
    normative, recommended, or advisory.
 4. Run compatibility and specification tests separately.
-5. Record whether previous results change and bump the correct ledger, rule, and
-   ruleset version axes.
-6. Regenerate the canonical artifacts and the `PROJECT_STATUS.md` table
+5. Write the remediation entry and the four message templates for every new or
+   re-cited assertion, from the pinned source rather than from another
+   scanner's advice, and say so where the source prescribes no fix.
+6. Record whether previous results change and bump the correct ledger, rule,
+   ruleset, and remediation version axes.
+7. Regenerate the canonical artifacts and the `PROJECT_STATUS.md` table
    (`pnpm run specs:canonicalise`, `pnpm run status:write`).
-7. Request review from someone other than the author for standards and security
+8. Request review from someone other than the author for standards and security
    changes.
 
 Do not silently reinterpret an old draft. Preserve the old ruleset when users

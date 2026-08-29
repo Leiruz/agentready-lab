@@ -1,0 +1,60 @@
+agentready-lab check - scan one exact loopback origin
+
+USAGE
+  agentready-lab check <url> [options]
+
+ARGUMENTS
+  <url>                  An http or https URL whose host is a loopback IP
+                         literal, such as http://127.0.0.1:3000 or
+                         http://[::1]:3000. A host name is refused: resolving
+                         one would put the hosts file, NSS and a DNS answer
+                         inside the loopback trust boundary.
+
+OPTIONS
+      --network-profile <local-loopback|ci-public>
+                         Default local-loopback. ci-public is refused: it is
+                         unimplemented, and this build has no policy object
+                         that could reach a public destination.
+      --mode <spec|compat|interop>
+                         Default spec.
+      --profile <content|api|agent-service|full>
+                         Default content. commerce is refused in M1.
+      --ruleset <version>
+                         Must equal the ruleset version this build pins.
+      --include <selectors>
+                         Comma-separated. Adds rules the profile does not list.
+      --exclude <selectors>
+                         Comma-separated. Always beats --include.
+      --format <human|json>
+                         Default human. json writes JSON only to stdout.
+      --source-map <path>
+                         A JSON object mapping an origin-relative request path
+                         to a repository-relative file path.
+      --strict-warnings  Treat an enforced warning as a failure.
+      --strict-unable    Treat an enforced unable-to-check as a failure.
+      --color            Emit colour. NO_COLOR in the environment still wins.
+      --no-color         Never emit colour. This is already the default: the
+                         output is the same bytes wherever it is run.
+  -h, --help             Print this help and exit 0.
+
+SELECTORS
+  web.discovery.robots   One exact rule id.
+  web.discovery.*        A namespace glob. '*' is only ever the last component.
+  @category:name         Every rule in one registry category.
+  @profile:name          Every rule listing one profile.
+
+  An unknown selector, a glob matching nothing, an empty element and an
+  uppercase character are each exit 2, before any request is issued.
+
+CONFIGURATION
+  agentready.config.json in the working directory, if it exists. Flags win over
+  the file, and the file wins over the built-in defaults, with two exceptions:
+  every network budget takes the minimum across all sources, and rules.disable
+  and --exclude take the union.
+
+NOTE
+  Six of the eight rules in this build are implemented and 'check' produces a
+  full report for them. web.discovery.sitemap and agent.discovery.skills are
+  still implementation_status 'planned', so a profile that selects one is
+  refused with exit 2 rather than scanned with a silent gap; --exclude them to
+  run today.

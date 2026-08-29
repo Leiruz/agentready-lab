@@ -77,7 +77,7 @@ export const markdownNegotiationRule: RuleDefinition = {
     modes: ["spec"],
     observationRuntime: ["http"],
     sourceMaturity: "convention",
-    implementationStatus: "planned",
+    implementationStatus: "supported",
     sources: [
       {
         id: "isit-2026-08-28",

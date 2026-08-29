@@ -3,14 +3,39 @@ import { REPORTERS_PACKAGE_VERSION } from "@agentready-lab/reporters";
 import { RULES_STANDARD_PACKAGE_VERSION } from "@agentready-lab/rules-standard";
 import { TRANSPORT_NODE_PACKAGE_VERSION } from "@agentready-lab/transport-node";
 
+import { CLI_PACKAGE_VERSION } from "./version.js";
+
 /**
- * Scaffold marker for `@agentready-lab/cli`.
+ * `@agentready-lab/cli`: argument parsing, configuration and package
+ * composition (`docs/ARCHITECTURE.md` section 4).
  *
- * No command, flag, configuration loader or exit code exists yet, and the
- * package deliberately declares no `bin` entry: it gets one in M1, when
- * `check` exists and has golden tests (`docs/ROADMAP.md`).
+ * `check` now completes: `nodeEnvironment` supplies the pinned assertions,
+ * source ledger, message templates and remediation table from
+ * `packages/rules-standard`'s generated projection of `specs/`, and six of the
+ * eight rules are `supported`, so a scan of a loopback origin produces a
+ * report with real findings and an exit code derived from them.
+ *
+ * The package still declares no `bin`, and that is now the narrower claim it
+ * was always meant to be. `docs/IMPLEMENTATION_SPEC.md` section 10 makes help
+ * text and exit-code goldens the bar for a command to be public, and
+ * `web.discovery.sitemap` and `agent.discovery.skills` are still `planned`, so
+ * a default invocation is refused rather than served with two silent gaps. A
+ * `bin` entry belongs with the last two rules. Everything here is reachable
+ * through `runCli` by any caller that wires an environment.
  */
-export const CLI_PACKAGE_VERSION = "0.0.0";
+export { CLI_PACKAGE_VERSION } from "./version.js";
+
+export { runCli } from "./run.js";
+export { nodeEnvironment } from "./environment.js";
+export type {
+  CliEnvironment,
+  FileRead,
+  PinnedArtifacts,
+} from "./environment.js";
+export type { CommandResult } from "./result.js";
+export { EXIT } from "./exit-codes.js";
+export type { ExitCode } from "./exit-codes.js";
+export { CliError } from "./errors.js";
 
 /**
  * The CLI is the composition root (`CLAUDE.md`, package boundaries), so it is

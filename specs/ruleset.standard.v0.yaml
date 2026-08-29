@@ -22,11 +22,15 @@ todo:
     declares none, which leaves the compat verdicts that ADR-0009 section 6
     expects for sig-003 and sig-006 with no assertion id to report against.
   - >-
-    message templates: ADR-0002 section 6 requires a template table keyed by
-    assertion id and outcome kind, published beside this file and versioned with
-    it. It does not exist, which is why every assertion below declares an empty
-    parameter schema and authorizes no excerpt. That is the fail-closed state:
-    validateOutcomeParams rejects every parameter an assertion does not declare.
+    message templates: the table ADR-0002 section 6 requires now exists as
+    specs/templates.v0.yaml, keyed by assertion id and outcome kind and joined
+    to this file by pnpm run specs:validate. What has not moved is the parameter
+    side of the same decision: every assertion below still declares an empty
+    parameter schema and authorizes no excerpt, so every template is
+    parameterless except content-signals.unrecognized-vocabulary's. That is the
+    fail-closed state, not an oversight: validateOutcomeParams rejects every
+    parameter an assertion does not declare, and assigning one is a decision
+    about what target-derived value a report may carry.
   - >-
     per-assertion source_refs: assigned for the eight M1 rules only, by reading
     each requirement against specs/sources.v0.yaml. The other fourteen rules
@@ -55,7 +59,7 @@ rules:
     title: "robots.txt"
     category: "discoverability"
     maturity: "stable"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -122,7 +126,7 @@ rules:
     title: "Sitemap"
     category: "discoverability"
     maturity: "stable"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -191,7 +195,7 @@ rules:
     title: "Link headers"
     category: "discoverability"
     maturity: "mixed"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -335,7 +339,7 @@ rules:
     title: "Markdown negotiation"
     category: "content-accessibility"
     maturity: "convention"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -419,7 +423,7 @@ rules:
     title: "AI bot rules"
     category: "bot-access-control"
     maturity: "mixed"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -496,7 +500,7 @@ rules:
     title: "Content Signals"
     category: "bot-access-control"
     maturity: "experimental"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["content", "api", "agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -807,7 +811,7 @@ rules:
     title: "Agent Skills discovery"
     category: "discovery"
     maturity: "draft"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["agent-service", "full"]
     runtime: ["http"]
     applicability:
@@ -959,7 +963,7 @@ rules:
     title: "API Catalog"
     category: "discovery"
     maturity: "stable"
-    implementation_status: "planned"
+    implementation_status: "supported"
     profiles: ["api", "agent-service", "full"]
     runtime: ["http"]
     applicability:

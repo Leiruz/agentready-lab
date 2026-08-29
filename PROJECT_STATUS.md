@@ -61,19 +61,19 @@ can rest on a `stable` RFC and still be `planned`.
 
 | Rule | Rule version | Implementation status | Source maturity |
 | --- | --- | --- | --- |
-| `web.discovery.robots` | 0.1.0 | planned | stable |
-| `web.discovery.sitemap` | 0.1.0 | planned | stable |
-| `web.discovery.link` | 0.1.0 | planned | mixed |
+| `web.discovery.robots` | 0.1.0 | supported | stable |
+| `web.discovery.sitemap` | 0.1.0 | supported | stable |
+| `web.discovery.link` | 0.1.0 | supported | mixed |
 | `dns.discovery.dns-aid` | 0.1.0 | planned | draft |
-| `web.content.markdown-negotiation` | 0.1.0 | planned | convention |
-| `web.policy.ai-crawler` | 0.2.0 | planned | mixed |
-| `web.policy.content-signals` | 0.2.0 | planned | experimental |
+| `web.content.markdown-negotiation` | 0.1.0 | supported | convention |
+| `web.policy.ai-crawler` | 0.2.0 | supported | mixed |
+| `web.policy.content-signals` | 0.2.0 | supported | experimental |
 | `web.identity.web-bot-auth` | 0.1.0 | planned | draft |
 | `agent.discovery.mcp-server-card` | 0.1.0 | planned | experimental |
 | `agent.discovery.a2a-agent-card` | 0.1.0 | planned | stable |
-| `agent.discovery.skills` | 0.1.0 | planned | draft |
+| `agent.discovery.skills` | 0.1.0 | supported | draft |
 | `agent.browser.webmcp` | 0.1.0 | planned | experimental |
-| `web.discovery.api-catalog` | 0.1.0 | planned | stable |
+| `web.discovery.api-catalog` | 0.1.0 | supported | stable |
 | `auth.discovery.oauth-authorization-server` | 0.1.0 | planned | stable |
 | `auth.discovery.oauth-protected-resource` | 0.1.0 | planned | stable |
 | `auth.discovery.auth-md` | 0.1.0 | planned | experimental |

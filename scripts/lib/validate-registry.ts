@@ -18,6 +18,16 @@ import {
  *   `source_refs` identifier in either other file resolves against it;
  * - `specs/ruleset.standard.v0.yaml` is the executable native ruleset.
  *
+ * Two further files are validated here and are not further authorities. Both
+ * hold prose keyed by the ruleset's assertion ids and no claim of their own,
+ * so both are checked for completeness against the ruleset rather than sealed
+ * with a digest:
+ *
+ * - `specs/remediation.v0.yaml` (ADR-0007 section 2), what a site operator is
+ *   told to change;
+ * - `specs/templates.v0.yaml` (ADR-0002 section 6), the static finding prose a
+ *   rule may not construct.
+ *
  * `specs/README.md` "Validation" is the requirement list this implements. It
  * is a pure function over text so that it has exactly two callers and no third
  * behaviour: `scripts/validate-registry.ts` runs it as `pnpm specs:validate`,
@@ -67,6 +77,52 @@ const HTTP_SOURCE_ID_ALLOWLIST: readonly string[] = [];
 const SNAPSHOT_FILE = "specs/checks.v0.yaml";
 const LEDGER_FILE = "specs/sources.v0.yaml";
 const RULESET_FILE = "specs/ruleset.standard.v0.yaml";
+const REMEDIATION_FILE = "specs/remediation.v0.yaml";
+const TEMPLATES_FILE = "specs/templates.v0.yaml";
+
+/**
+ * `OutcomeKind` in `packages/core/src/model/status.ts`, and the required key
+ * set of a `messages` block.
+ *
+ * All four rather than the kinds a rule body happens to reach: `renderMessage`
+ * throws `missing-message-template` for a kind it has no entry for, and
+ * nothing readable from `specs/` can say which kinds a compiled rule produces.
+ * Requiring the whole vocabulary is the only coverage rule that cannot drift
+ * away from the rule sources, and a template for a kind a rule never reaches
+ * is unreachable text rather than a false claim. `specs/templates.v0.yaml`
+ * records the unreachable ones in each entry's own `todo`, which this
+ * validator prints.
+ */
+const OUTCOME_KINDS: readonly string[] = [
+  "satisfied",
+  "violated",
+  "not-present",
+  "indeterminate",
+];
+
+/** A `{name}` slot, matching `renderMessage`'s substitution pattern exactly. */
+const TEMPLATE_SLOT = /\{([a-z][a-z0-9-]*)\}/g;
+
+/**
+ * ADR-0007 section 2's three classes, fixed by the assertion's `strength`
+ * rather than chosen per entry.
+ *
+ * The mapping is not a style preference: `findingStatus` in
+ * `packages/core/src/engine/derive-status.ts` derives `fail` from a violated
+ * `normative` or `compatibility` assertion and `warning` from a violated
+ * `recommended` or `advisory` one. So a `recommended-hardening` on a normative
+ * assertion is a required correction printed beside a `fail`, and a
+ * `required-correction` on an advisory one asserts a conformance defect the
+ * status itself denies. `compatibility` has no `strength` in the ruleset
+ * schema; `checkRuleset` synthesizes it for a `compat_assertions` entry, whose
+ * class is always `compatibility` under ADR-0002 section 9.
+ */
+const REMEDIATION_CLASS_FOR_STRENGTH: Readonly<Record<string, string>> = {
+  normative: "required-correction",
+  recommended: "recommended-hardening",
+  advisory: "recommended-hardening",
+  compatibility: "compatibility-workaround",
+};
 
 /**
  * Keys ADR-0008 section 2 forbids on a ruleset rule entry. `compat` is a dated
@@ -137,6 +193,10 @@ export interface RegistryValidationInput {
   readonly ledgerSchemaJson: string;
   readonly rulesetYaml: string;
   readonly rulesetSchemaJson: string;
+  readonly remediationYaml: string;
+  readonly remediationSchemaJson: string;
+  readonly templatesYaml: string;
+  readonly templatesSchemaJson: string;
   /**
    * The committed generated artifacts, when they should be checked for
    * currency. `null` skips the currency check, which is what
@@ -699,6 +759,45 @@ interface Ledger {
 /** ADR-0010 section 1. The `kind` a self-authored source carries. */
 const PROJECT_POLICY_KIND = "project-policy";
 
+/** One ruleset assertion, reduced to what a remediation entry joins against. */
+interface IndexedAssertion {
+  readonly ruleId: string;
+  /** `normative`, `recommended`, `advisory`, or the synthesized `compatibility`. */
+  readonly strength: string | null;
+  /** ADR-0010 section 4: declared, never evaluated, so never remediated. */
+  readonly deferred: boolean;
+  /** The ledger ids this assertion rests on, with any section pointer dropped. */
+  readonly sources: readonly string[];
+  /**
+   * The parameter names this assertion declares, to whether it requires one.
+   *
+   * ADR-0002 section 6 makes the parameter schema a per-assertion contract, so
+   * it is what decides whether a `{slot}` in a template is legal. `required`
+   * is carried because an optional parameter is a slot `renderMessage` throws
+   * `missing-template-parameter` on whenever a rule omits the value.
+   */
+  readonly params: ReadonlyMap<string, boolean>;
+}
+
+/**
+ * What `checkRuleset` learned, for the checks that join another file to it.
+ *
+ * Returned rather than recomputed because `checkRuleset` already walks every
+ * rule, every requirement and every retirement. A second walk would be a
+ * second reading of the same tree that can disagree with the first.
+ */
+interface RulesetIndex {
+  readonly id: string | null;
+  readonly version: string | null;
+  /** Every `spec.requirements` and `compat_assertions` id the ruleset declares. */
+  readonly assertions: ReadonlyMap<string, IndexedAssertion>;
+  /** Every `retired_requirements` id, to the rule and the decision that retired it. */
+  readonly retired: ReadonlyMap<
+    string,
+    { readonly ruleId: string; readonly adr: string | null }
+  >;
+}
+
 function checkLedger(
   root: Record<string, unknown>,
   issues: RegistryIssue[],
@@ -1015,7 +1114,7 @@ function checkRuleset(
   snapshotChecks: ReadonlyMap<string, SnapshotCheck>,
   issues: RegistryIssue[],
   notes: RegistryNote[],
-): void {
+): RulesetIndex {
   collectTodos(root, RULESET_FILE, [], notes);
 
   const declaredLedgerVersion = asString(root["source_ledger_version"]);
@@ -1034,6 +1133,11 @@ function checkRuleset(
   const rules = asArray(root["rules"]) ?? [];
   const ruleIdEntries: Entry[] = [];
   const assertionIdEntries: Entry[] = [];
+  const indexedAssertions = new Map<string, IndexedAssertion>();
+  const retiredAssertions = new Map<
+    string,
+    { readonly ruleId: string; readonly adr: string | null }
+  >();
 
   for (const [index, raw] of rules.entries()) {
     const rule = asRecord(raw);
@@ -1085,6 +1189,13 @@ function checkRuleset(
       if (id === null) continue;
       const requirement = asRecord(rawRequirement);
       declared.set(id, asString(requirement?.["text"]) ?? "");
+      indexAssertion(
+        indexedAssertions,
+        id,
+        ruleId,
+        asString(requirement?.["strength"]),
+        requirement,
+      );
       assertionIdEntries.push({
         value: id,
         location: at(RULESET_FILE, ...assertionPath, "id"),
@@ -1103,9 +1214,28 @@ function checkRuleset(
         notes,
       );
       if (id === null) continue;
+      // ADR-0002 section 9: a compat assertion's class is always
+      // `compatibility`, which is why the schema gives it no `strength` field.
+      indexAssertion(
+        indexedAssertions,
+        id,
+        ruleId,
+        "compatibility",
+        asRecord(rawCompat),
+      );
       assertionIdEntries.push({
         value: id,
         location: at(RULESET_FILE, ...assertionPath, "id"),
+      });
+    }
+
+    for (const rawRetirement of asArray(rule["retired_requirements"]) ?? []) {
+      const retirement = asRecord(rawRetirement);
+      const retiredId = asString(retirement?.["id"]);
+      if (retiredId === null || ruleId === null) continue;
+      retiredAssertions.set(retiredId, {
+        ruleId,
+        adr: asString(retirement?.["adr"]),
       });
     }
 
@@ -1125,6 +1255,48 @@ function checkRuleset(
     "assertion id",
     issues,
   );
+
+  return {
+    id: asString(root["ruleset_id"]),
+    version: asString(root["ruleset_version"]),
+    assertions: indexedAssertions,
+    retired: retiredAssertions,
+  };
+}
+
+/**
+ * Records one assertion for the remediation join.
+ *
+ * A duplicate id is already an issue (`duplicate-assertion-id`), so the first
+ * declaration wins here rather than the last: the remediation entry that names
+ * the id is then judged against the same declaration the duplicate report
+ * points at.
+ */
+function indexAssertion(
+  into: Map<string, IndexedAssertion>,
+  id: string,
+  ruleId: string | null,
+  strength: string | null,
+  assertion: Record<string, unknown> | null,
+): void {
+  if (ruleId === null || into.has(id)) return;
+  const sources: string[] = [];
+  for (const raw of asArray(assertion?.["source_refs"]) ?? []) {
+    const source = asString(asRecord(raw)?.["source"]);
+    if (source !== null) sources.push(source);
+  }
+  const params = new Map<string, boolean>();
+  for (const raw of asArray(assertion?.["params"]) ?? []) {
+    const name = asString(asRecord(raw)?.["name"]);
+    if (name !== null) params.set(name, asRecord(raw)?.["required"] === true);
+  }
+  into.set(id, {
+    ruleId,
+    strength,
+    deferred: asRecord(assertion?.["deferred"]) !== null,
+    sources,
+    params,
+  });
 }
 
 /**
@@ -1446,6 +1618,343 @@ function reportDeltas(
 }
 
 // ---------------------------------------------------------------------------
+// Remediation, and its join with the ruleset
+// ---------------------------------------------------------------------------
+
+/**
+ * ADR-0007 section 3's two completeness gates, and the class check that makes
+ * FR-6's three kinds mean something.
+ *
+ * The coverage rule is mechanical rather than a maintained list of rules.
+ * ADR-0007 says every assertion "whose class can derive `fail` or `warning`"
+ * needs an entry, and `findingStatus` derives one of those two from a
+ * `violated` outcome of every class there is. So the only assertions that
+ * cannot produce a finding are the ones a scan refuses to run at all:
+ * `validateRuleAssertions` throws `assertion-sources-unassigned` for an
+ * uncited assertion before a socket opens, and `RulesetAssertionIndex.forRule`
+ * drops a deferred one from the active set. **Cited and not deferred** is
+ * therefore exactly the set that is owed remediation, which is why the
+ * fourteen rules whose assertions still carry the `source_refs` todo need no
+ * entries and will demand them automatically on the day their citations land.
+ *
+ * `ledger.referenced` is deliberately not touched here. Marking a source as
+ * referenced because remediation cited it would let a remediation entry keep a
+ * ledger source alive that no check and no rule uses, which is the dead
+ * provenance the orphan-source check exists to find.
+ */
+function checkRemediation(
+  root: Record<string, unknown>,
+  ruleset: RulesetIndex,
+  ledger: Ledger,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  collectTodos(root, REMEDIATION_FILE, [], notes);
+
+  for (const [field, expected] of [
+    ["ruleset_id", ruleset.id],
+    ["ruleset_version", ruleset.version],
+  ] as const) {
+    const declared = asString(root[field]);
+    if (declared === null || expected === null || declared === expected) {
+      continue;
+    }
+    issues.push({
+      code: "remediation-ruleset-mismatch",
+      location: at(REMEDIATION_FILE, field),
+      message: `remediation is written against ${field} ${declared} but ${RULESET_FILE} is ${expected}`,
+    });
+  }
+
+  const entries = asArray(root["entries"]) ?? [];
+  const codeEntries: Entry[] = [];
+  const covered = new Set<string>();
+
+  for (const [index, raw] of entries.entries()) {
+    const entry = asRecord(raw);
+    if (entry === null) continue;
+    const path: readonly (string | number)[] = ["entries", index];
+
+    collectTodos(entry, REMEDIATION_FILE, path, notes);
+    checkDate(
+      entry["authored_at"],
+      at(REMEDIATION_FILE, ...path, "authored_at"),
+      {
+        issues,
+        // This file declares no clock of its own, so `authored_at` is checked
+        // for shape and for being a real calendar date and for nothing else.
+        // Adding a ceiling would mean adding a fifth dated version axis to
+        // ADR-0007's four, which no accepted decision asks for.
+        ceiling: null,
+      },
+    );
+
+    const code = asString(entry["finding_code"]);
+    if (code === null) continue;
+    codeEntries.push({
+      value: code,
+      location: at(REMEDIATION_FILE, ...path, "finding_code"),
+    });
+    covered.add(code);
+
+    const retired = ruleset.retired.get(code);
+    if (retired !== undefined) {
+      issues.push({
+        code: "remediation-for-retired-assertion",
+        location: at(REMEDIATION_FILE, ...path, "finding_code"),
+        message: `${retired.ruleId} retired "${code}" under ${retired.adr ?? "an unnamed decision"}, so it can produce no finding to remediate`,
+      });
+      continue;
+    }
+
+    const assertion = ruleset.assertions.get(code);
+    if (assertion === undefined) {
+      issues.push({
+        code: "remediation-unknown-assertion",
+        location: at(REMEDIATION_FILE, ...path, "finding_code"),
+        message: `"${code}" is declared by no rule in ${RULESET_FILE}`,
+      });
+      continue;
+    }
+
+    if (assertion.deferred) {
+      issues.push({
+        code: "remediation-for-deferred-assertion",
+        location: at(REMEDIATION_FILE, ...path, "finding_code"),
+        message: `"${code}" is deferred under ADR-0010 section 4, is never evaluated, and can produce no finding to remediate`,
+      });
+      continue;
+    }
+
+    if (assertion.sources.length === 0) {
+      issues.push({
+        code: "remediation-for-uncited-assertion",
+        location: at(REMEDIATION_FILE, ...path, "finding_code"),
+        message: `"${code}" cites no source, so no scan can configure it and no text here could be grounded in one`,
+      });
+      continue;
+    }
+
+    const ruleId = asString(entry["rule_id"]);
+    if (ruleId !== null && ruleId !== assertion.ruleId) {
+      issues.push({
+        code: "remediation-rule-mismatch",
+        location: at(REMEDIATION_FILE, ...path, "rule_id"),
+        message: `"${code}" is declared by ${assertion.ruleId}, not by ${ruleId}`,
+      });
+    }
+
+    const strength = assertion.strength;
+    const declaredClass = asString(entry["class"]);
+    const requiredClass =
+      strength === null ? undefined : REMEDIATION_CLASS_FOR_STRENGTH[strength];
+    if (
+      strength !== null &&
+      declaredClass !== null &&
+      requiredClass !== undefined &&
+      declaredClass !== requiredClass
+    ) {
+      issues.push({
+        code: "remediation-class-mismatch",
+        location: at(REMEDIATION_FILE, ...path, "class"),
+        message: `"${code}" is ${strength} in ${RULESET_FILE}, so its class is ${requiredClass}, not ${declaredClass}`,
+      });
+    }
+
+    // ADR-0007 section 4: remediation "must resolve against the same registry
+    // as the finding's sourceRefs ... so that remediation cannot drift away
+    // from the requirement it explains". Unresolved is the registry half;
+    // the subset is the drift half, and it is the one that matters, because a
+    // fix resting on a source the requirement does not rest on is a second,
+    // uncited claim wearing the finding's citation.
+    for (const [refIndex, rawRef] of (
+      asArray(entry["source_refs"]) ?? []
+    ).entries()) {
+      const ref = asString(rawRef);
+      if (ref === null) continue;
+      const where = at(REMEDIATION_FILE, ...path, "source_refs", refIndex);
+      if (!ledger.ids.has(ref)) {
+        issues.push({
+          code: "unresolved-source-ref",
+          location: where,
+          message: `source_refs entry "${ref}" resolves to no source in ${LEDGER_FILE}`,
+        });
+        continue;
+      }
+      if (assertion.sources.includes(ref)) continue;
+      issues.push({
+        code: "remediation-source-drift",
+        location: where,
+        message: `"${code}" does not rest on "${ref}"; remediation may only cite what the assertion cites`,
+      });
+    }
+  }
+
+  checkUnique(codeEntries, "duplicate-finding-code", "finding_code", issues);
+
+  for (const [code, assertion] of ruleset.assertions) {
+    if (assertion.deferred || assertion.sources.length === 0) continue;
+    if (covered.has(code)) continue;
+    issues.push({
+      code: "remediation-missing",
+      location: at(REMEDIATION_FILE, "entries"),
+      message: `assertion "${code}" of ${assertion.ruleId} is active and cited, and has no remediation entry; runScan refuses the scan before any request (ADR-0007 section 3)`,
+    });
+  }
+}
+
+/**
+ * ADR-0002 section 6. Joins `specs/templates.v0.yaml` to the ruleset.
+ *
+ * Same coverage rule as `checkRemediation`, for the same reason and with one
+ * addition. An assertion that cites a source and is not deferred can be
+ * configured, so it needs an entry; without one `renderMessage` throws
+ * `missing-message-template` and the scan dies part-way through, on whatever
+ * the target happened to serve. The addition is the parameter join: a template
+ * may reference only a parameter the assertion declares, because the core
+ * substitutes a slot from `AssertionOutcome.params` and
+ * `validateOutcomeParams` rejects any parameter the assertion did not declare.
+ * A slot naming something else is a message no rule can ever render, and it is
+ * also the one route by which prose could ask for a value the ruleset never
+ * bounded.
+ */
+function checkTemplates(
+  root: Record<string, unknown>,
+  ruleset: RulesetIndex,
+  issues: RegistryIssue[],
+  notes: RegistryNote[],
+): void {
+  collectTodos(root, TEMPLATES_FILE, [], notes);
+
+  for (const [field, expected] of [
+    ["ruleset_id", ruleset.id],
+    ["ruleset_version", ruleset.version],
+  ] as const) {
+    const declared = asString(root[field]);
+    if (declared === null || expected === null || declared === expected) {
+      continue;
+    }
+    issues.push({
+      code: "templates-ruleset-mismatch",
+      location: at(TEMPLATES_FILE, field),
+      message: `templates are written against ${field} ${declared} but ${RULESET_FILE} is ${expected}`,
+    });
+  }
+
+  const entries = asArray(root["entries"]) ?? [];
+  const idEntries: Entry[] = [];
+  const covered = new Set<string>();
+
+  for (const [index, raw] of entries.entries()) {
+    const entry = asRecord(raw);
+    if (entry === null) continue;
+    const path: readonly (string | number)[] = ["entries", index];
+
+    collectTodos(entry, TEMPLATES_FILE, path, notes);
+
+    const code = asString(entry["assertion"]);
+    if (code === null) continue;
+    idEntries.push({
+      value: code,
+      location: at(TEMPLATES_FILE, ...path, "assertion"),
+    });
+    covered.add(code);
+
+    const retired = ruleset.retired.get(code);
+    if (retired !== undefined) {
+      issues.push({
+        code: "templates-for-retired-assertion",
+        location: at(TEMPLATES_FILE, ...path, "assertion"),
+        message: `${retired.ruleId} retired "${code}" under ${retired.adr ?? "an unnamed decision"}, so no outcome can ever be rendered for it`,
+      });
+      continue;
+    }
+
+    const assertion = ruleset.assertions.get(code);
+    if (assertion === undefined) {
+      issues.push({
+        code: "templates-unknown-assertion",
+        location: at(TEMPLATES_FILE, ...path, "assertion"),
+        message: `"${code}" is declared by no rule in ${RULESET_FILE}`,
+      });
+      continue;
+    }
+
+    if (assertion.deferred) {
+      issues.push({
+        code: "templates-for-deferred-assertion",
+        location: at(TEMPLATES_FILE, ...path, "assertion"),
+        message: `"${code}" is deferred under ADR-0010 section 4, is never evaluated, and can produce no outcome to render`,
+      });
+      continue;
+    }
+
+    if (assertion.sources.length === 0) {
+      issues.push({
+        code: "templates-for-uncited-assertion",
+        location: at(TEMPLATES_FILE, ...path, "assertion"),
+        message: `"${code}" cites no source, so no scan can configure it and no prose here could be grounded in one`,
+      });
+      continue;
+    }
+
+    const ruleId = asString(entry["rule_id"]);
+    if (ruleId !== null && ruleId !== assertion.ruleId) {
+      issues.push({
+        code: "templates-rule-mismatch",
+        location: at(TEMPLATES_FILE, ...path, "rule_id"),
+        message: `"${code}" is declared by ${assertion.ruleId}, not by ${ruleId}`,
+      });
+    }
+
+    const messages = asRecord(entry["messages"]);
+    if (messages === null) continue;
+    for (const kind of OUTCOME_KINDS) {
+      const template = asString(messages[kind]);
+      if (template === null) {
+        issues.push({
+          code: "templates-missing-outcome",
+          location: at(TEMPLATES_FILE, ...path, "messages", kind),
+          message: `"${code}" has no ${kind} template; renderMessage throws missing-message-template on the outcome a rule reports for it`,
+        });
+        continue;
+      }
+      for (const match of template.matchAll(TEMPLATE_SLOT)) {
+        const name = match[1] ?? "";
+        const required = assertion.params.get(name);
+        if (required === undefined) {
+          issues.push({
+            code: "undeclared-template-parameter",
+            location: at(TEMPLATES_FILE, ...path, "messages", kind),
+            message: `the ${kind} template references parameter "${name}", which "${code}" does not declare in ${RULESET_FILE}`,
+          });
+          continue;
+        }
+        if (!required) {
+          issues.push({
+            code: "optional-template-parameter",
+            location: at(TEMPLATES_FILE, ...path, "messages", kind),
+            message: `the ${kind} template references parameter "${name}", which "${code}" declares as not required; renderMessage throws missing-template-parameter whenever a rule omits it`,
+          });
+        }
+      }
+    }
+  }
+
+  checkUnique(idEntries, "duplicate-template-assertion", "assertion", issues);
+
+  for (const [code, assertion] of ruleset.assertions) {
+    if (assertion.deferred || assertion.sources.length === 0) continue;
+    if (covered.has(code)) continue;
+    issues.push({
+      code: "templates-missing",
+      location: at(TEMPLATES_FILE, "entries"),
+      message: `assertion "${code}" of ${assertion.ruleId} is active and cited, and has no template entry; renderMessage throws missing-message-template mid-scan without one (ADR-0002 section 6)`,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The validator
 // ---------------------------------------------------------------------------
 
@@ -1473,11 +1982,25 @@ export async function validateRegistry(
     RULESET_FILE,
     issues,
   );
+  const remediationDoc = load(
+    input.remediationYaml,
+    input.remediationSchemaJson,
+    REMEDIATION_FILE,
+    issues,
+  );
+  const templatesDoc = load(
+    input.templatesYaml,
+    input.templatesSchemaJson,
+    TEMPLATES_FILE,
+    issues,
+  );
 
   if (
     snapshotDoc.root === null ||
     ledgerDoc.root === null ||
-    rulesetDoc.root === null
+    rulesetDoc.root === null ||
+    remediationDoc.root === null ||
+    templatesDoc.root === null
   ) {
     return { issues, notes, artifacts: null };
   }
@@ -1510,7 +2033,15 @@ export async function validateRegistry(
 
   const ledger = checkLedger(ledgerDoc.root, issues, notes);
   const snapshotChecks = checkSnapshot(snapshotDoc.root, ledger, issues);
-  checkRuleset(rulesetDoc.root, ledger, snapshotChecks, issues, notes);
+  const ruleset = checkRuleset(
+    rulesetDoc.root,
+    ledger,
+    snapshotChecks,
+    issues,
+    notes,
+  );
+  checkRemediation(remediationDoc.root, ruleset, ledger, issues, notes);
+  checkTemplates(templatesDoc.root, ruleset, issues, notes);
 
   // An unreferenced source is dead provenance: it claims the ledger rests on
   // something neither file cites.
