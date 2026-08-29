@@ -25,7 +25,7 @@
     "specs:canonicalise": "node --import ./scripts/lib/ts-extension-resolve.js scripts/validate-registry.ts --write",
     "status:check": "node --import ./scripts/lib/ts-extension-resolve.js scripts/status-table.ts",
     "status:write": "node --import ./scripts/lib/ts-extension-resolve.js scripts/status-table.ts --write",
-    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:workers && pnpm run specs:validate && pnpm run status:check && pnpm run build"
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:workers && pnpm run specs:validate && pnpm run status:check && pnpm run build"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

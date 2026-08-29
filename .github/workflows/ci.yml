@@ -69,7 +69,15 @@ jobs:
       - name: 1. Formatting check
         run: pnpm run format:check
 
-      - name: 2. Lint and package-boundary check
+      # Typecheck runs before lint on purpose. typescript-eslint's
+      # type-aware rules read the declaration output that `tsc --build`
+      # emits for the project references, so linting a clean checkout
+      # first reports thousands of unresolved-type errors. Verified: on
+      # a cleaned tree `eslint packages/transport-node` alone gives 280.
+      - name: 2. TypeScript typecheck
+        run: pnpm run typecheck
+
+      - name: 3. Lint and package-boundary check
         # The boundary check is a test, not a lint rule (docs/TEST_STRATEGY.md
         # section 4), so it runs here as its own vitest project to fail fast on
         # a dependency-direction violation. Step 4 re-runs it as part of the
@@ -77,9 +85,6 @@ jobs:
         run: |
           pnpm run lint
           pnpm run test:boundaries
-
-      - name: 3. TypeScript typecheck
-        run: pnpm run typecheck
 
       - name: 4. Unit and contract tests
         # docs/TEST_STRATEGY.md section 2.4 requires this job to run with
