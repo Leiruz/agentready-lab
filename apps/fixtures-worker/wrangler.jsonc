@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agentready-fixtures",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // There is deliberately no "compatibility_flags": ["nodejs_compat"] here.
+  // With that flag on, workerd polyfills the node:* modules, and this Worker
+  // stops proving that fixture code imports no Node-only runtime package
+  // (docs/ARCHITECTURE.md section 4, docs/TEST_STRATEGY.md section 4). The
+  // runtime-neutrality proof only bites while the flag is absent. Do not add
+  // it; if a fixture ever appears to need it, that fixture is wrong.
+
+  "workers_dev": false,
+
+  // Wrangler reports anonymous usage telemetry by default. Turn it off: a
+  // conformance lab should not phone home about what a maintainer is running
+  // locally (docs/THREAT_MODEL.md sections 20.1 and 29).
+  "send_metrics": false,
+}

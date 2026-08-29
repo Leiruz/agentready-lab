@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/rules-standard" },
+    { "path": "./packages/transport-node" },
+    { "path": "./packages/reporters" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/github-action" },
+    { "path": "./packages/testkit" },
+    { "path": "./apps/fixtures-worker" }
+  ]
+}

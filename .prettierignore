@@ -1,0 +1,24 @@
+# Generated or tool-owned output.
+pnpm-lock.yaml
+**/dist/
+.wrangler/
+coverage/
+.tri/
+
+# Formatting scope: Prettier owns source and configuration in this repository,
+# not the written blueprint.
+#
+# printWidth 80 matches the prose in the existing Markdown line for line, but
+# Prettier's Markdown printer additionally pads every table cell so the columns
+# line up. Running it would rewrite every table in the root documents, docs/,
+# and docs/decisions/ (14 files) and produce a large diff against the reviewed
+# first commit that says nothing about formatting quality. Some of the padded
+# tables come out well over 80 columns, so this is not a printWidth that can be
+# tuned into agreement. Whether the documents adopt Prettier is a decision for
+# whoever owns them, and it belongs in its own commit.
+**/*.md
+
+# specs/ is the pinned machine-readable source snapshot
+# (docs/STANDARDS_REGISTRY.md). Prettier reflows its inline sequences and JSON
+# arrays; a formatting pass must never show up in the diff of a pinned spec.
+/specs/

@@ -1,0 +1,34 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+
+    // Narrow, documented exception to the repository-wide
+    // "skipLibCheck": false. It applies to this file only: the Workers test
+    // type environment, not to any product package.
+    //
+    // @cloudflare/vitest-pool-workers@0.22.0 ships types/cloudflare-test.d.ts
+    // referring to FetcherScheduledOptions, ServiceBindingQueueMessage and
+    // FetcherQueueResult, none of which exist in @cloudflare/workers-types v5,
+    // and the file also trips TS7010 and two TS2344s. Separately, workers-types
+    // and @types/node (reached through vitest's own types) both declare
+    // console, crypto, Buffer, process, Event and the stream classes, which is
+    // TS2300/TS2451/TS6200 by construction.
+    //
+    // Neither is our code and neither is fixable here. Remove this line and
+    // re-run `pnpm typecheck` after a pool upgrade to find out whether it is
+    // still needed.
+    "skipLibCheck": true,
+
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types"
+    ]
+  },
+  "include": ["test/**/*.ts", "vitest.config.ts", "worker-props.d.ts"],
+  "exclude": ["dist/**"]
+}

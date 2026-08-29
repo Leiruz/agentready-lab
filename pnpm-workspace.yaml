@@ -1,0 +1,25 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Supply-chain controls. Each setting below was verified as understood by
+# pnpm 10.34.5 before being added; see docs/THREAT_MODEL.md section 22.
+
+# "Disable install lifecycle scripts by default; document and allow only
+# audited exceptions." pnpm 10 blocks dependency build scripts by default and
+# reports what it ignored; this array is the audited allow-list. Adding an
+# entry means someone read that package's install script. Keep it empty
+# unless a dependency genuinely cannot work without one, and say why here.
+onlyBuiltDependencies: []
+
+# A silently satisfied peer range is an undeclared dependency, and dependency
+# review cannot review what is not declared. Verified enforced from this file
+# by pnpm 10.34.5 (ERR_PNPM_PEER_DEP_ISSUES).
+strictPeerDependencies: true
+
+# Quarantine window against a compromised release being pulled minutes after
+# publication. 10080 minutes = 7 days. Verified enforced by pnpm 10.34.5 for
+# ranges and for exact pins (ERR_PNPM_NO_MATURE_MATCHING_VERSION), so raising
+# a pin to a release younger than this window is a hard install failure, not
+# a warning.
+minimumReleaseAge: 10080

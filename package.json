@@ -1,0 +1,39 @@
+{
+  "name": "agentready-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "typecheck": "tsc --build && tsc --project tsconfig.test.json && tsc --project apps/fixtures-worker/tsconfig.test.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run --project unit",
+    "test:boundaries": "vitest run --project boundaries",
+    "test:workers": "pnpm --filter fixtures-worker run test",
+    "test:integration": "echo \"M1: no integration tests exist yet; test/integration is unimplemented (docs/ROADMAP.md)\" && exit 0",
+    "test:security": "echo \"M3: no ci-public transport security tests exist yet; test/security is unimplemented (docs/ROADMAP.md)\" && exit 0",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run test:workers && pnpm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.11",
+    "eslint": "10.9.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.11.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.11",
+    "yaml": "2.9.0"
+  }
+}

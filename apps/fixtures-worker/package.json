@@ -1,0 +1,20 @@
+{
+  "name": "fixtures-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "dev": "wrangler dev",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.22.0",
+    "@cloudflare/workers-types": "5.20260822.1",
+    "vitest": "4.1.11",
+    "wrangler": "4.125.0"
+  }
+}
